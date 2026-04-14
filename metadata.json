@@ -1,0 +1,5 @@
+{
+  "name": "PV AE Master Generator",
+  "description": "A Pharmacovigilance (PV) tool that uses AI to extract Adverse Event (AE) data from package inserts to generate AE Master files, and provides signal monitoring capabilities.",
+  "requestFramePermissions": []
+}
