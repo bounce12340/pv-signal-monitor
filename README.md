@@ -63,6 +63,28 @@ A modern, AI-powered Pharmacovigilance (PV) web application designed to automate
 - **AI Integration:** Google GenAI SDK (`@google/genai`), Gemini 3 Flash Preview
 - **Data Storage:** LocalStorage with In-Memory Caching (Client-side)
 
+## 🔌 Multi-AI Provider Support (Roadmap/Guide)
+
+Currently, this project uses Google's `@google/genai` SDK to interact with Gemini models. If you wish to integrate multiple AI providers (such as OpenAI, Claude, xAI, Ollama, or OpenRouter), you can follow this architectural guide:
+
+### 1. Use a Unified API Gateway (Recommended: OpenRouter)
+The easiest way to support multiple models without installing dozens of SDKs is to use **OpenRouter**. OpenRouter provides an OpenAI-compatible REST API that routes requests to Claude, xAI, Gemini, Llama, and more.
+- Replace the `@google/genai` SDK with the standard `openai` Node.js SDK.
+- Change the `baseURL` to `https://openrouter.ai/api/v1`.
+- Pass the specific model string (e.g., `anthropic/claude-3.5-sonnet`, `x-ai/grok-2`) dynamically based on user selection.
+
+### 2. Local Models via Ollama
+If you want to process highly sensitive Pharmacovigilance data locally without sending it to the cloud, you can use **Ollama**.
+- Ensure Ollama is running locally (`http://localhost:11434`).
+- Use the `openai` SDK and set the `baseURL` to `http://localhost:11434/v1`.
+- *Note: You may need to configure CORS in Ollama to allow requests from your Vite frontend.*
+
+### 3. Code Refactoring Steps
+To implement this in the codebase:
+1. **Abstract the AI Service:** Modify `services/gemini.ts` (rename it to `services/ai.ts`). Create a generic interface `extractAEMaster(textInput, fileInput, provider, model, apiKey)`.
+2. **UI Configuration:** Add a "Settings" modal in the UI where users can select their preferred AI Provider (Gemini, OpenAI, Claude, Ollama), input the specific Model Name, and provide their API Key.
+3. **Prompt Engineering:** Different models parse JSON differently. You may need to adjust the `SYSTEM_INSTRUCTION` or use specific JSON-mode flags (like `response_format: { type: "json_object" }` for OpenAI) depending on the selected provider.
+
 ---
 
 <h1 id="繁體中文說明">繁體中文說明</h1>
@@ -126,3 +148,25 @@ A modern, AI-powered Pharmacovigilance (PV) web application designed to automate
 - **前端框架:** React 19, Vite, Tailwind CSS, Lucide React
 - **AI 整合:** Google GenAI SDK (`@google/genai`), Gemini 3 Flash Preview 模型
 - **資料儲存:** 瀏覽器 LocalStorage 搭配記憶體快取 (純前端架構)
+
+## 🔌 多 AI 模型串接指南 (OpenAI, Claude, xAI, Ollama, OpenRouter)
+
+目前本專案預設使用 Google 的 `@google/genai` SDK 來呼叫 Gemini 模型。如果您希望在未來擴充支援多種 AI 來源，可以參考以下的架構指南進行修改：
+
+### 1. 使用統一的 API 網關 (強烈推薦：OpenRouter)
+要支援多種模型又不想安裝一堆不同的 SDK，最簡單的方法是使用 **OpenRouter**。它提供與 OpenAI 完全相容的 REST API，並能將請求路由給 Claude, xAI, Gemini, Llama 等各大模型。
+- 將專案中的 `@google/genai` 替換為標準的 `openai` Node.js SDK。
+- 將 API 的 `baseURL` 更改為 `https://openrouter.ai/api/v1`。
+- 根據使用者的選擇，動態傳入對應的模型名稱字串 (例如：`anthropic/claude-3.5-sonnet`, `x-ai/grok-2`)。
+
+### 2. 透過 Ollama 執行地端模型 (Local Models)
+如果您的藥品安全監視 (PV) 資料具備高度機密性，不希望上傳至雲端，您可以使用 **Ollama** 在本地端執行開源模型。
+- 確保 Ollama 已在本地端運行 (預設為 `http://localhost:11434`)。
+- 同樣使用 `openai` SDK，並將 `baseURL` 指向 `http://localhost:11434/v1`。
+- *注意：由於本專案是純前端 (Vite) 架構，您可能需要設定 Ollama 的環境變數來允許 CORS 跨域請求。*
+
+### 3. 程式碼重構步驟
+若要實作此功能，您需要進行以下修改：
+1. **抽象化 AI 服務層：** 將 `services/gemini.ts` 重新命名為 `services/ai.ts`。建立一個通用的介面，例如 `extractAEMaster(textInput, fileInput, provider, model, apiKey)`。
+2. **UI 設定介面：** 在前端畫面新增一個「設定 (Settings)」彈出視窗，讓使用者可以選擇他們偏好的 AI 供應商 (Gemini, OpenAI, Claude, Ollama)、輸入指定的模型名稱，以及填寫他們自己的 API Key。
+3. **提示詞工程 (Prompt Engineering) 微調：** 不同的模型對於輸出 JSON 的理解能力不同。您可能需要根據選擇的模型微調 `SYSTEM_INSTRUCTION`，或是針對 OpenAI 相容的 API 加上強制 JSON 輸出的參數 (例如 `response_format: { type: "json_object" }`)。
