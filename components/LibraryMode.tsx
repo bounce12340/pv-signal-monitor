@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { db, Product, LabelAeMaster, MonitorBatch, QuarterlyAeMonitor } from '../services/db';
-import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity, Download, Upload, TrendingUp } from 'lucide-react';
+import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity, Download, Upload, TrendingUp, Layers } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 import { TrendView } from './TrendView';
+import { MasterVersion, diffMasters } from '../services/versions';
 
 interface LibraryModeProps {
   savedProducts: Product[];
@@ -22,10 +23,21 @@ export const LibraryMode = React.memo(({
   const [viewingProduct, setViewingProduct] = useState<{product: Product, masters: LabelAeMaster[]} | null>(null);
   const [viewingBatch, setViewingBatch] = useState<{batch: MonitorBatch, records: QuarterlyAeMonitor[]} | null>(null);
   const [viewingTrend, setViewingTrend] = useState<{product: Product, records: QuarterlyAeMonitor[]} | null>(null);
+  const [viewingVersions, setViewingVersions] = useState<{product: Product, versions: MasterVersion[], currentRows: LabelAeMaster[]} | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const handleViewTrend = (product: Product) => {
     setViewingTrend({ product, records: db.getQuarterlyAeMonitors(product.product_id) });
+  };
+
+  const handleViewVersions = (product: Product) => {
+    setSelectedVersionId('');
+    setViewingVersions({
+      product,
+      versions: db.getMasterVersions(product.product_id),
+      currentRows: db.getLabelAeMasters(product.product_id),
+    });
   };
 
   const handleExportBackup = () => {
@@ -165,6 +177,13 @@ export const LibraryMode = React.memo(({
                         >
                           <TrendingUp size={16} />
                         </button>
+                        <button
+                          onClick={() => handleViewVersions(p)}
+                          className="text-violet-600 bg-violet-50 hover:bg-violet-100 p-1.5 rounded transition-colors"
+                          title="主檔版本歷史與差異比較"
+                        >
+                          <Layers size={16} />
+                        </button>
                         <button 
                           onClick={() => handleDeleteProduct(p.product_id)} 
                           className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors"
@@ -294,6 +313,109 @@ export const LibraryMode = React.memo(({
               </table>
           </div>
         )}
+      </DetailModal>
+
+      {/* Master Version History Modal */}
+      <DetailModal
+        isOpen={!!viewingVersions}
+        onClose={() => setViewingVersions(null)}
+        title={viewingVersions ? `主檔版本歷史：${viewingVersions.product.product_name}` : ''}
+      >
+        {viewingVersions && (() => {
+          const { versions, currentRows } = viewingVersions;
+          const selected = versions.find((v) => v.version_id === selectedVersionId);
+          const diff = selected ? diffMasters(selected.rows, currentRows) : null;
+          return (
+            <div className="space-y-4">
+              <div className="text-sm text-slate-500 bg-white p-3 rounded border border-slate-200">
+                現行主檔共 <strong>{currentRows.length}</strong> 列。
+                每次「儲存更新」時，舊版主檔會自動封存於此（共 {versions.length} 個歷史版本）。
+              </div>
+
+              {versions.length === 0 ? (
+                <div className="text-center text-slate-400 text-sm py-8">
+                  尚無封存版本。之後在「AE 主檔生成」對此產品執行「儲存更新」時，舊版會自動封存。
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">選擇要與現行版本比較的歷史版本</label>
+                    <select
+                      value={selectedVersionId}
+                      onChange={(e) => setSelectedVersionId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+                    >
+                      <option value="">-- 請選擇歷史版本 --</option>
+                      {versions.map((v) => (
+                        <option key={v.version_id} value={v.version_id}>
+                          {new Date(v.archived_at).toLocaleString()}（{v.rows.length} 列，仿單日期 {v.label_version_date || '未填'}）
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {diff && (
+                    <div className="space-y-3">
+                      <div className="flex gap-3 text-xs">
+                        <span className="px-2 py-1 rounded bg-green-50 text-green-700 border border-green-200 font-medium">新增 {diff.added.length}</span>
+                        <span className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200 font-medium">移除 {diff.removed.length}</span>
+                        <span className="px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">門檻變動 {diff.changed.length}</span>
+                        <span className="px-2 py-1 rounded bg-slate-50 text-slate-500 border border-slate-200">未變 {diff.unchanged}</span>
+                      </div>
+
+                      {diff.added.length > 0 && (
+                        <div className="border border-green-200 rounded-lg overflow-hidden">
+                          <div className="bg-green-50 px-3 py-1.5 text-xs font-bold text-green-800">新增項目（現行版本才有）</div>
+                          <table className="w-full text-xs">
+                            <tbody className="divide-y divide-slate-100">
+                              {diff.added.map((e) => (
+                                <tr key={e.term}><td className="px-3 py-1.5 font-medium">{e.term}</td><td className="px-3 py-1.5 text-slate-500">{e.soc}</td><td className="px-3 py-1.5 text-right font-mono">{e.threshold}%</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {diff.removed.length > 0 && (
+                        <div className="border border-red-200 rounded-lg overflow-hidden">
+                          <div className="bg-red-50 px-3 py-1.5 text-xs font-bold text-red-800">移除項目（僅舊版有）</div>
+                          <table className="w-full text-xs">
+                            <tbody className="divide-y divide-slate-100">
+                              {diff.removed.map((e) => (
+                                <tr key={e.term}><td className="px-3 py-1.5 font-medium">{e.term}</td><td className="px-3 py-1.5 text-slate-500">{e.soc}</td><td className="px-3 py-1.5 text-right font-mono">{e.threshold}%</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {diff.changed.length > 0 && (
+                        <div className="border border-amber-200 rounded-lg overflow-hidden">
+                          <div className="bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">門檻變動</div>
+                          <table className="w-full text-xs">
+                            <tbody className="divide-y divide-slate-100">
+                              {diff.changed.map((e) => (
+                                <tr key={e.term}>
+                                  <td className="px-3 py-1.5 font-medium">{e.term}</td>
+                                  <td className="px-3 py-1.5 text-slate-500">{e.soc}</td>
+                                  <td className="px-3 py-1.5 text-right font-mono">{e.from}% → <strong>{e.to}%</strong></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0 && (
+                        <div className="text-center text-slate-400 text-sm py-4">此版本與現行主檔內容相同。</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
       </DetailModal>
 
       {/* Trend Analysis Modal */}

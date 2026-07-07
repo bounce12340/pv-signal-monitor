@@ -1,5 +1,6 @@
 import type { ExtractedMaster } from '../types';
 import type { AeMasterItem } from './analysis';
+import type { MasterVersion } from './versions';
 
 // Simple ID generator
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -71,7 +72,8 @@ const DB_KEYS = {
   PRODUCTS: 'pv_db_products',
   MASTER: 'pv_db_label_ae_master',
   MONITOR: 'pv_db_quarterly_ae_monitor',
-  LOGS: 'pv_db_system_logs'
+  LOGS: 'pv_db_system_logs',
+  VERSIONS: 'pv_db_master_versions'
 };
 
 // --- Memory Cache ---
@@ -214,6 +216,10 @@ export const db = {
     const monitors = db.getQuarterlyAeMonitors().filter(m => m.product_id !== productId);
     saveToStorageAndCache(DB_KEYS.MONITOR, monitors);
 
+    // Cascade delete archived master versions
+    const versions = db.getMasterVersions().filter(v => v.product_id !== productId);
+    saveToStorageAndCache(DB_KEYS.VERSIONS, versions);
+
     // LOGGING
     db.addLog('DELETE', 'PRODUCT', `Deleted product: ${productName} and all associated records.`);
   },
@@ -235,6 +241,15 @@ export const db = {
     
     const updated = [...filteredCurrent, ...masters];
     saveToStorageAndCache(DB_KEYS.MASTER, updated);
+  },
+
+  // Master version archive
+  getMasterVersions: (productId?: string): MasterVersion[] => {
+    const all = getFromCacheOrStorage<MasterVersion>(DB_KEYS.VERSIONS);
+    if (productId) {
+      return all.filter(v => v.product_id === productId);
+    }
+    return all;
   },
 
   // Monitor
@@ -335,6 +350,7 @@ export const db = {
     label_ae_master: db.getLabelAeMasters(),
     quarterly_ae_monitor: db.getQuarterlyAeMonitors(),
     system_logs: db.getLogs(),
+    master_versions: db.getMasterVersions(),
   }),
 
   // Replaces ALL local data with the backup content. Caller must confirm first.
@@ -347,11 +363,13 @@ export const db = {
     const masters = (Array.isArray(d.label_ae_master) ? d.label_ae_master : []) as LabelAeMaster[];
     const monitors = (Array.isArray(d.quarterly_ae_monitor) ? d.quarterly_ae_monitor : []) as QuarterlyAeMonitor[];
     const logs = (Array.isArray(d.system_logs) ? d.system_logs : []) as SystemLog[];
+    const versions = (Array.isArray(d.master_versions) ? d.master_versions : []) as MasterVersion[];
 
     saveToStorageAndCache(DB_KEYS.PRODUCTS, products);
     saveToStorageAndCache(DB_KEYS.MASTER, masters);
     saveToStorageAndCache(DB_KEYS.MONITOR, monitors);
     saveToStorageAndCache(DB_KEYS.LOGS, logs);
+    saveToStorageAndCache(DB_KEYS.VERSIONS, versions);
 
     db.addLog('IMPORT', 'SYSTEM',
       `Restored backup (products: ${products.length}, master rows: ${masters.length}, monitor rows: ${monitors.length})`);
@@ -365,6 +383,24 @@ export const db = {
     const productId = existingProductId || generateId();
     const now = new Date().toISOString();
     const isUpdate = !!existingProductId;
+
+    // Archive the current master rows before an update overwrites them,
+    // so label revisions stay traceable and diffable.
+    if (isUpdate) {
+      const existingRows = db.getLabelAeMasters(productId);
+      if (existingRows.length > 0) {
+        const prevProduct = db.getProducts().find(p => p.product_id === productId);
+        const version: MasterVersion = {
+          version_id: generateId(),
+          product_id: productId,
+          product_name: prevProduct?.product_name || data.product_name,
+          label_version_date: prevProduct?.label_version_date || '',
+          archived_at: now,
+          rows: existingRows,
+        };
+        saveToStorageAndCache(DB_KEYS.VERSIONS, [version, ...db.getMasterVersions()]);
+      }
+    }
 
     const product: Product = {
       product_id: productId,
