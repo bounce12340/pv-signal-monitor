@@ -3,7 +3,24 @@ import { extractAEMaster, FileInput } from '../services/ai';
 import { db, Product } from '../services/db';
 import { AeMasterItem } from '../services/analysis';
 import { ExtractedMaster } from '../types';
-import { FileText, Upload, Database, AlertCircle, Check, Save, Plus, Trash2, Edit2, FileType } from 'lucide-react';
+import { FileText, Upload, Database, AlertCircle, Check, Save, Plus, Trash2, Edit2, FileType, Layers, Loader2, Eye } from 'lucide-react';
+
+interface BatchItem {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+  status: 'pending' | 'processing' | 'done' | 'error';
+  result?: ExtractedMaster;
+  error?: string;
+}
+
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`無法讀取檔案：${file.name}`));
+    reader.readAsDataURL(file);
+  });
 
 interface GeneratorModeProps {
   masterResult: ExtractedMaster | null;
@@ -26,17 +43,68 @@ export const GeneratorMode = React.memo(({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [batchQueue, setBatchQueue] = useState<BatchItem[]>([]);
+  const [batchRunning, setBatchRunning] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = ''; // allow re-selecting the same file(s)
+    if (files.length === 0) return;
+
+    if (files.length === 1) {
+      // Single-file flow (existing behavior)
+      setBatchQueue([]);
+      const file = files[0];
       setUploadedFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFileDataUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      setFileDataUrl(await readAsDataUrl(file));
+      return;
     }
+
+    // Batch flow: queue every file for sequential extraction
+    try {
+      const items: BatchItem[] = await Promise.all(
+        files.map(async (f) => ({
+          name: f.name,
+          mimeType: f.type,
+          dataUrl: await readAsDataUrl(f),
+          status: 'pending' as const,
+        }))
+      );
+      setUploadedFile(null);
+      setFileDataUrl(null);
+      setBatchQueue(items);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '讀取檔案失敗');
+    }
+  };
+
+  const runBatch = async () => {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    const queue = [...batchQueue];
+    for (let i = 0; i < queue.length; i++) {
+      if (queue[i].status === 'done') continue;
+      queue[i] = { ...queue[i], status: 'processing', error: undefined };
+      setBatchQueue([...queue]);
+      try {
+        const base64 = queue[i].dataUrl.split(',')[1];
+        const result = await extractAEMaster('', { data: base64, mimeType: queue[i].mimeType });
+        queue[i] = { ...queue[i], status: 'done', result };
+      } catch (err) {
+        queue[i] = { ...queue[i], status: 'error', error: err instanceof Error ? err.message : '解析失敗' };
+      }
+      setBatchQueue([...queue]);
+    }
+    setBatchRunning(false);
+  };
+
+  const handleLoadBatchResult = (item: BatchItem) => {
+    if (!item.result) return;
+    setMasterResult(item.result);
+    setCurrentExtractionProductId(null);
+    setSaveStatus('idle');
+    setError(null);
   };
 
   const handleClearFile = (e: React.MouseEvent) => {
@@ -172,11 +240,12 @@ export const GeneratorMode = React.memo(({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">仿單檔案 (PDF / 圖片)</label>
               <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 hover:bg-slate-50 text-center cursor-pointer relative transition-colors bg-slate-50/30">
-                <input 
-                  type="file" 
-                  accept="image/*,application/pdf" 
-                  onChange={handleFileChange} 
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  onChange={handleFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
                 {uploadedFile ? (
                   <div className="relative flex flex-col items-center justify-center p-2">
@@ -206,11 +275,64 @@ export const GeneratorMode = React.memo(({
                   <div className="text-slate-400 py-6">
                     <Upload size={32} className="mx-auto mb-2 text-slate-300" />
                     <p className="text-sm font-medium text-slate-600">點擊上傳 PDF 或 圖片</p>
-                    <p className="text-xs text-slate-400 mt-1">支援 .pdf, .jpg, .png</p>
+                    <p className="text-xs text-slate-400 mt-1">支援 .pdf, .jpg, .png；可一次選多個檔案批次解析</p>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Batch queue panel */}
+            {batchQueue.length > 0 && (
+              <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
+                <div className="flex justify-between items-center px-3 py-2 bg-slate-50 border-b border-slate-200">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Layers size={14} /> 批次佇列 ({batchQueue.filter(b => b.status === 'done').length}/{batchQueue.length})
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={runBatch}
+                      disabled={batchRunning || batchQueue.every(b => b.status === 'done')}
+                      className="text-xs px-3 py-1 rounded font-medium bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {batchRunning && <Loader2 size={12} className="animate-spin" />}
+                      {batchRunning ? '解析中...' : batchQueue.some(b => b.status === 'error') ? '重試失敗項目' : '開始批次解析'}
+                    </button>
+                    <button
+                      onClick={() => setBatchQueue([])}
+                      disabled={batchRunning}
+                      className="text-xs px-2 py-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                  {batchQueue.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2 px-3 py-2 text-xs">
+                      <span className="flex-1 truncate text-slate-700" title={item.name}>{item.name}</span>
+                      {item.status === 'pending' && <span className="text-slate-400">待處理</span>}
+                      {item.status === 'processing' && <span className="text-brand-600 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> 解析中</span>}
+                      {item.status === 'error' && <span className="text-red-600 truncate max-w-[45%]" title={item.error}>✗ {item.error}</span>}
+                      {item.status === 'done' && (
+                        <>
+                          <span className="text-green-600">✓ {item.result?.ae_master.length ?? 0} 項</span>
+                          <button
+                            onClick={() => handleLoadBatchResult(item)}
+                            className="px-2 py-0.5 rounded bg-brand-50 text-brand-700 hover:bg-brand-100 font-medium flex items-center gap-1"
+                            title="載入到右側編輯區覆核後存檔"
+                          >
+                            <Eye size={12} /> 載入檢視
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-100 text-[10px] text-amber-700">
+                  解析完成後請逐一「載入檢視」→ 人工覆核 → 存入資料庫。批次解析不會自動存檔。
+                </div>
+              </div>
+            )}
             <button
               onClick={handleProcess}
               disabled={loading}
