@@ -316,7 +316,12 @@ export const LibraryMode = React.memo(({
                 <tbody className="divide-y divide-slate-100">
                   {viewingBatch.records.map(r => (
                     <tr key={r.id} className={`hover:bg-slate-50 ${r.status === 'red' ? 'bg-red-50' : r.status === 'yellow' ? 'bg-yellow-50' : ''}`}>
-                      <td className="px-3 py-2 font-medium">{r.ae_term}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {r.ae_term}
+                        {r.serious && (
+                          <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200" title="含嚴重案例">S</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right font-mono">{r.count}</td>
                       <td className="px-3 py-2 text-right font-mono font-bold text-slate-700">{r.rate_pct.toFixed(4)}%</td>
                       <td className="px-3 py-2 text-right font-mono text-slate-400">{r.threshold_pct}%</td>

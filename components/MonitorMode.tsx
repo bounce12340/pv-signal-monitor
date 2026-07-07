@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { performAnalysis, AnalysisReport } from '../services/analysis';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
+import { settings } from '../services/settings';
 import { AppMode, ExtractedMaster } from '../types';
-import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle } from 'lucide-react';
+
+interface CountRow { term: string; count: string; serious: boolean; }
 
 interface MonitorModeProps {
   masterResult: ExtractedMaster | null;
@@ -30,7 +33,7 @@ export const MonitorMode = React.memo(({
   const [exposureUnit, setExposureUnit] = useState('季');
   const [exposureVal, setExposureVal] = useState<string>('');
 
-  const [inputCounts, setInputCounts] = useState<{term: string, count: string}[]>([{term: '', count: ''}]);
+  const [inputCounts, setInputCounts] = useState<CountRow[]>([{term: '', count: '', serious: false}]);
   const [analysisReport, setAnalysisReport] = useState<AnalysisReport | null>(null);
   const [showAllTerms, setShowAllTerms] = useState(false);
   const [monitorSaveStatus, setMonitorSaveStatus] = useState<'idle' | 'saved'>('idle');
@@ -74,10 +77,10 @@ export const MonitorMode = React.memo(({
     }
   };
 
-  const handleAddRow = () => setInputCounts([...inputCounts, { term: '', count: '' }]);
+  const handleAddRow = () => setInputCounts([...inputCounts, { term: '', count: '', serious: false }]);
   const handleRemoveRow = (idx: number) => setInputCounts(inputCounts.filter((_, i) => i !== idx));
 
-  const handleInputChange = (idx: number, field: 'term' | 'count', value: string) => {
+  const handleInputChange = (idx: number, field: 'term' | 'count' | 'serious', value: string | boolean) => {
     const newRows = [...inputCounts];
     newRows[idx] = { ...newRows[idx], [field]: value };
     setInputCounts(newRows);
@@ -88,37 +91,53 @@ export const MonitorMode = React.memo(({
     if (!lastRow.term && !lastRow.count) {
       handleInputChange(inputCounts.length - 1, 'term', term);
     } else {
-      setInputCounts([...inputCounts, { term, count: '' }]);
+      setInputCounts([...inputCounts, { term, count: '', serious: false }]);
     }
   };
 
-  const runAnalysis = () => {
+  // Replace an unmatched input term with the suggested master term and re-run.
+  const handleAdoptSuggestion = (originalTerm: string, suggestedTerm: string) => {
+    const newRows = inputCounts.map((r) =>
+      r.term.trim() === originalTerm ? { ...r, term: suggestedTerm } : r
+    );
+    setInputCounts(newRows);
+    runAnalysis(newRows);
+  };
+
+  const runAnalysis = (rows: CountRow[] = inputCounts) => {
     if (!masterResult) {
       alert("請先載入產品或產生主檔");
       return;
     }
     const val = parseFloat(exposureVal);
-    
+
     if (!exposureVal || isNaN(val) || val <= 0) {
       alert("⚠️ 注意：尚未產生有效的暴露量！\n\n請完整填寫「銷售數量」與「每日使用量」，系統將自動計算分母。");
       return;
     }
 
-    const validCounts = inputCounts
-      .filter(r => r.term.trim() !== '') 
+    const validCounts = rows
+      .filter(r => r.term.trim() !== '')
       .map(r => ({
-        term: r.term,
-        count: parseInt(r.count, 10) || 0
+        term: r.term.trim(),
+        count: parseInt(r.count, 10) || 0,
+        serious: r.serious
       }));
 
+    const rules = settings.getRules();
     const report = performAnalysis(masterResult, {
       quarter,
       exposure_value: val,
       exposure_unit: exposureUnit,
       ae_counts: validCounts
     }, {
-      includeAllMasterTerms: showAllTerms
+      includeAllMasterTerms: showAllTerms,
+      rules
     });
+
+    db.addLog('ANALYSIS', 'MONITOR',
+      `Ran signal analysis for ${quarter} (terms: ${validCounts.length}, ` +
+      `rules: minN=${rules.minCaseCount}, alertX=${rules.alertMultiplier}, buffer=${rules.toleranceMarginPct}%)`);
 
     setAnalysisReport(report);
     setMonitorSaveStatus('idle');
@@ -128,8 +147,8 @@ export const MonitorMode = React.memo(({
     if (!analysisReport) return;
 
     const BOM = "\uFEFF"; 
-    const headers = ["判定 (Status)", "AE Term", "SOC", "仿單頻率 (Label Freq)", "本季案例數 (Count)", "發生率 (Rate %)", "仿單門檻 (Threshold %)"];
-    
+    const headers = ["判定 (Status)", "AE Term", "SOC", "仿單頻率 (Label Freq)", "嚴重 (Serious)", "本季案例數 (Count)", "發生率 (Rate %)", "仿單門檻 (Threshold %)", "備註 (Note)"];
+
     const rows = analysisReport.rows.map(row => {
       let statusText = 'Normal';
       if (row.status === 'unexpected') statusText = 'Unexpected';
@@ -141,13 +160,17 @@ export const MonitorMode = React.memo(({
         `"${row.ae_term.replace(/"/g, '""')}"`,
         `"${row.soc.replace(/"/g, '""')}"`,
         `"${row.frequency_category.replace(/"/g, '""')}"`,
+        row.serious ? 'Y' : '',
         row.count,
         row.incidence_rate_pct.toFixed(4),
-        row.threshold_pct
+        row.threshold_pct,
+        row.noise_suppressed ? `"n<${analysisReport.rules.minCaseCount} noise-suppressed"` : ''
       ].join(",");
     });
 
-    const csvContent = BOM + headers.join(",") + "\n" + rows.join("\n");
+    const r = analysisReport.rules;
+    const rulesLine = `"Rules: minCaseCount=${r.minCaseCount}; alert=${r.alertMultiplier}x threshold - ${r.toleranceMarginPct}%; exposure=${exposureVal} ${exposureUnit}"`;
+    const csvContent = BOM + headers.join(",") + "\n" + rows.join("\n") + "\n" + rulesLine;
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -169,6 +192,8 @@ export const MonitorMode = React.memo(({
 
     const records: QuarterlyAeMonitor[] = [];
     const now = new Date().toISOString();
+    const r = analysisReport.rules;
+    const ruleSnapshot = `minN=${r.minCaseCount};alertX=${r.alertMultiplier};buffer=${r.toleranceMarginPct}%`;
 
     if (analysisReport.rows.length === 0) {
       const id = Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -183,7 +208,8 @@ export const MonitorMode = React.memo(({
         rate_pct: 0,
         threshold_pct: 0,
         status: 'normal',
-        generated_at: now
+        generated_at: now,
+        rule_snapshot: ruleSnapshot
       });
     } else {
       analysisReport.rows.forEach(row => {
@@ -191,7 +217,7 @@ export const MonitorMode = React.memo(({
         if (row.status === 'alert') status = 'red';
         if (row.status === 'warning') status = 'yellow';
         if (row.status === 'unexpected') status = 'red';
-        
+
         const id = Date.now().toString(36) + Math.random().toString(36).substring(2);
 
         records.push({
@@ -202,10 +228,12 @@ export const MonitorMode = React.memo(({
           exposure_unit: exposureUnit,
           ae_term: row.ae_term,
           count: row.count,
+          serious: row.serious,
           rate_pct: row.incidence_rate_pct,
           threshold_pct: row.threshold_pct,
           status: status,
-          generated_at: now
+          generated_at: now,
+          rule_snapshot: ruleSnapshot
         });
       });
     }
@@ -371,15 +399,29 @@ export const MonitorMode = React.memo(({
                     />
                   </div>
                   <div className="w-24">
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       min="0"
-                      value={row.count} 
+                      value={row.count}
                       onChange={(e) => handleInputChange(idx, 'count', e.target.value)}
                       placeholder="Count"
                       className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-center focus:ring-1 focus:ring-brand-500 outline-none"
                     />
                   </div>
+                  <label
+                    className={`flex items-center gap-1 text-xs cursor-pointer select-none px-2 py-2 rounded border transition-colors ${
+                      row.serious ? 'bg-rose-50 border-rose-300 text-rose-700 font-semibold' : 'border-slate-200 text-slate-400 hover:text-slate-600'
+                    }`}
+                    title="勾選代表本項含嚴重 (Serious) 不良反應案例"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={row.serious}
+                      onChange={(e) => handleInputChange(idx, 'serious', e.target.checked)}
+                      className="accent-rose-600"
+                    />
+                    嚴重
+                  </label>
                   <button onClick={() => handleRemoveRow(idx)} className="text-slate-400 hover:text-red-500 transition-colors p-1">
                     <Trash2 size={16} />
                   </button>
@@ -389,8 +431,8 @@ export const MonitorMode = React.memo(({
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end">
-              <button 
-                onClick={runAnalysis}
+              <button
+                onClick={() => runAnalysis()}
                 disabled={!masterResult}
                 className="px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg shadow-lg shadow-brand-200 transition-all flex items-center gap-2 disabled:opacity-50"
               >
@@ -419,6 +461,9 @@ export const MonitorMode = React.memo(({
                   </div>
                   
                   <div className="flex items-center gap-4">
+                    <div className="text-xs text-slate-400" title="本報表使用的判定規則（可於右上角設定調整）">
+                      規則: n≥{analysisReport.rules.minCaseCount}、Alert={analysisReport.rules.alertMultiplier}×門檻−{analysisReport.rules.toleranceMarginPct}%
+                    </div>
                     <div className="text-xs text-slate-400">
                       Exposure: {exposureVal} {exposureUnit}
                     </div>
@@ -489,15 +534,42 @@ export const MonitorMode = React.memo(({
                             'hover:bg-slate-50'
                           }>
                             <td className="px-4 py-3">
-                              {row.status === 'unexpected' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-600 text-white shadow-sm"><AlertTriangle size={12}/> 未預期 (Unexpected)</span>}
-                              {row.status === 'alert' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-200 text-red-800">⚠️ 異常</span>}
-                              {row.status === 'warning' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-yellow-200 text-yellow-800">⚠️ 提醒</span>}
-                              {row.status === 'normal' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">正常</span>}
+                              <div className="flex flex-col gap-1 items-start">
+                                {row.status === 'unexpected' && row.serious && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-800 text-white shadow-sm animate-pulse"><AlertTriangle size={12}/> 未預期＋嚴重</span>}
+                                {row.status === 'unexpected' && !row.serious && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-600 text-white shadow-sm"><AlertTriangle size={12}/> 未預期 (Unexpected)</span>}
+                                {row.status === 'alert' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-200 text-red-800">⚠️ 異常</span>}
+                                {row.status === 'warning' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-yellow-200 text-yellow-800">⚠️ 提醒</span>}
+                                {row.status === 'normal' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">正常</span>}
+                                {row.noise_suppressed && (
+                                  <span
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200"
+                                    title={`發生率已達關注區間，但案例數低於最小案例數 (n<${analysisReport.rules.minCaseCount})，依規則維持「正常」。`}
+                                  >
+                                    n&lt;{analysisReport.rules.minCaseCount} 噪音抑制
+                                  </span>
+                                )}
+                              </div>
                             </td>
-                            <td className="px-4 py-3 font-medium text-slate-900">{row.ae_term}</td>
+                            <td className="px-4 py-3 font-medium text-slate-900">
+                              {row.ae_term}
+                              {row.serious && row.status !== 'unexpected' && (
+                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200" title="含嚴重案例">S</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-slate-500 text-xs">
                               {row.status === 'unexpected' ? (
-                                <span className="text-rose-600 italic">未登載於主檔</span>
+                                <div className="space-y-1">
+                                  <span className="text-rose-600 italic">未登載於主檔</span>
+                                  {row.suggestion && (
+                                    <button
+                                      onClick={() => handleAdoptSuggestion(row.ae_term, row.suggestion!.term)}
+                                      className="block text-left text-brand-600 hover:text-brand-800 underline decoration-dotted"
+                                      title={`相似度 ${(row.suggestion.similarity * 100).toFixed(0)}%，點擊以主檔詞彙重新分析`}
+                                    >
+                                      是否即為「{row.suggestion.term}」？點此採用
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <>
                                   <div className="truncate max-w-[150px]" title={row.soc}>{row.soc}</div>

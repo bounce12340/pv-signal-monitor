@@ -32,10 +32,13 @@ export interface QuarterlyAeMonitor {
   exposure_unit: string;
   ae_term: string;
   count: number;
+  serious?: boolean;
   rate_pct: number;
   threshold_pct: number;
   status: 'normal' | 'yellow' | 'red'; // Simplified status as per requirement (mapped from internal)
   generated_at: string;
+  // Signal rule parameters in force when this record was generated (audit trail)
+  rule_snapshot?: string;
 }
 
 // 4. System Logs (Audit Trail)
