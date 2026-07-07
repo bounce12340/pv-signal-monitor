@@ -9,6 +9,9 @@ import { KeyRound, SlidersHorizontal, Check } from 'lucide-react';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
 const OLLAMA_URL = 'http://localhost:11434/v1';
+// Proxied by the Vite dev/preview server (see vite.config.ts) because
+// ollama.com does not allow cross-origin browser requests.
+const OLLAMA_CLOUD_URL = '/ollama-cloud/v1';
 
 export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   const [ai, setAi] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
@@ -110,6 +113,13 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
                   className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
                 >
                   Ollama (本機)
+                </button>
+                <button
+                  onClick={() => setAi({ ...ai, baseUrl: OLLAMA_CLOUD_URL })}
+                  className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
+                  title="走 Vite 代理連 ollama.com（瀏覽器無法直連，僅本機開發/預覽伺服器可用）"
+                >
+                  Ollama Cloud
                 </button>
               </div>
             </div>
