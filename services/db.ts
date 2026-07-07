@@ -1,3 +1,6 @@
+import type { ExtractedMaster } from '../types';
+import type { AeMasterItem } from './analysis';
+
 // Simple ID generator
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
@@ -65,11 +68,11 @@ const DB_KEYS = {
 };
 
 // --- Memory Cache ---
-const cache: Record<string, any> = {};
+const cache: Record<string, unknown> = {};
 
 function getFromCacheOrStorage<T>(key: string): T[] {
   if (cache[key]) {
-    return cache[key];
+    return cache[key] as T[];
   }
   const str = localStorage.getItem(key);
   const data = str ? JSON.parse(str) : [];
@@ -181,7 +184,7 @@ export const db = {
   // Get distinct batches (reports) for display in library
   getMonitorBatches: (): MonitorBatch[] => {
     if (cache['monitor_batches']) {
-      return cache['monitor_batches'];
+      return cache['monitor_batches'] as MonitorBatch[];
     }
 
     const all = db.getQuarterlyAeMonitors();
@@ -260,7 +263,7 @@ export const db = {
   // --- High Level Actions ---
 
   // Save a full master extraction result
-  saveExtractedMaster: (data: any, existingProductId?: string) => {
+  saveExtractedMaster: (data: ExtractedMaster, existingProductId?: string) => {
     const productId = existingProductId || generateId();
     const now = new Date().toISOString();
     const isUpdate = !!existingProductId;
@@ -272,9 +275,9 @@ export const db = {
     };
 
     const masters: LabelAeMaster[] = [];
-    data.ae_master.forEach((item: any) => {
+    data.ae_master.forEach((item) => {
       const groupId = generateId(); // Group terms that belong to the same entry
-      item.ae_terms_split.forEach((term: string) => {
+      item.ae_terms_split.forEach((term) => {
         masters.push({
           id: generateId(),
           product_id: productId,
@@ -299,11 +302,11 @@ export const db = {
   },
 
   // Convert DB master rows back to format needed for analysis
-  getMasterForAnalysis: (productId: string) => {
+  getMasterForAnalysis: (productId: string): ExtractedMaster => {
     const rows = db.getLabelAeMasters(productId);
-    
+
     // Group rows by group_id to reconstruct the master items
-    const groupedMap = new Map<string, any>();
+    const groupedMap = new Map<string, AeMasterItem>();
     
     rows.forEach(r => {
       // Use group_id if available. If not (legacy data), use id to keep them separate.
@@ -320,7 +323,7 @@ export const db = {
         });
       }
       
-      const group = groupedMap.get(gid);
+      const group = groupedMap.get(gid)!;
       group.ae_terms_split.push(r.ae_term);
     });
 
@@ -330,9 +333,10 @@ export const db = {
       ae_term_raw: item.ae_terms_split.join(' / ')
     }));
 
-    return { 
+    return {
       product_name: "", // Not strictly needed for analysis logic
-      ae_master 
+      label_version_date: "",
+      ae_master
     };
   }
 };

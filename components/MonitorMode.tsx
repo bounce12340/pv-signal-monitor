@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { performAnalysis, AnalysisReport } from '../services/analysis';
-import { db, QuarterlyAeMonitor } from '../services/db';
+import { db, Product, QuarterlyAeMonitor } from '../services/db';
+import { AppMode, ExtractedMaster } from '../types';
 import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, AlertCircle } from 'lucide-react';
+
+interface MonitorModeProps {
+  masterResult: ExtractedMaster | null;
+  setMasterResult: (m: ExtractedMaster | null) => void;
+  savedProducts: Product[];
+  selectedProductId: string;
+  setSelectedProductId: (id: string) => void;
+  setDbUpdateTrigger: React.Dispatch<React.SetStateAction<number>>;
+  setActiveMode: (m: AppMode) => void;
+}
 
 export const MonitorMode = React.memo(({
   masterResult, setMasterResult,
@@ -9,7 +20,7 @@ export const MonitorMode = React.memo(({
   selectedProductId, setSelectedProductId,
   setDbUpdateTrigger,
   setActiveMode
-}: any) => {
+}: MonitorModeProps) => {
   const [selYear, setSelYear] = useState(new Date().getFullYear().toString());
   const [selQ, setSelQ] = useState('Q1');
   const quarter = `${selYear}${selQ}`;
@@ -147,7 +158,7 @@ export const MonitorMode = React.memo(({
     document.body.removeChild(link);
 
     db.addLog('EXPORT', 'MONITOR', `Exported CSV Analysis Report for ${quarter} (Rows: ${analysisReport.rows.length})`);
-    setDbUpdateTrigger((prev: number) => prev + 1);
+    setDbUpdateTrigger((prev) => prev + 1);
   };
 
   const handleSaveAnalysis = () => {
@@ -201,7 +212,7 @@ export const MonitorMode = React.memo(({
 
     if (records.length > 0) {
        db.saveQuarterlyAeMonitors(records);
-       setDbUpdateTrigger((prev: number) => prev + 1);
+       setDbUpdateTrigger((prev) => prev + 1);
     }
     
     setMonitorSaveStatus('saved');
@@ -218,7 +229,7 @@ export const MonitorMode = React.memo(({
               className="flex-1 md:w-64 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-brand-500 outline-none"
             >
               <option value="">-- 請選擇產品 --</option>
-              {savedProducts.map((p: any) => (
+              {savedProducts.map((p) => (
                 <option key={p.product_id} value={p.product_id}>{p.product_name} ({p.label_version_date})</option>
               ))}
             </select>
@@ -320,7 +331,7 @@ export const MonitorMode = React.memo(({
             <div className="bg-slate-50/90 rounded-xl border border-slate-200 p-4 max-h-[400px] overflow-hidden flex flex-col">
               <h4 className="font-semibold text-xs text-slate-500 uppercase mb-3">主檔可用 AE Term 參考</h4>
               <div className="flex-1 overflow-y-auto space-y-1 pr-2">
-                {masterResult.ae_master.map((item: any, i: number) => (
+                {masterResult.ae_master.map((item, i) => (
                     <button 
                     key={i} 
                     onClick={() => handleQuickAddTerm(item.ae_terms_split[0])}

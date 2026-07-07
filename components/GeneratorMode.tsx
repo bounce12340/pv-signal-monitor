@@ -1,14 +1,25 @@
 import React, { useState } from 'react';
 import { extractAEMaster, FileInput } from '../services/gemini';
-import { db } from '../services/db';
+import { db, Product } from '../services/db';
+import { AeMasterItem } from '../services/analysis';
+import { ExtractedMaster } from '../types';
 import { FileText, Upload, Database, AlertCircle, Check, Save, Plus, Trash2, Edit2, FileType } from 'lucide-react';
+
+interface GeneratorModeProps {
+  masterResult: ExtractedMaster | null;
+  setMasterResult: (m: ExtractedMaster | null) => void;
+  currentExtractionProductId: string | null;
+  setCurrentExtractionProductId: (id: string | null) => void;
+  setSavedProducts: React.Dispatch<React.SetStateAction<Product[]>>;
+  setSelectedProductId: (id: string) => void;
+}
 
 export const GeneratorMode = React.memo(({
   masterResult, setMasterResult,
   currentExtractionProductId, setCurrentExtractionProductId,
   setSavedProducts,
   setSelectedProductId
-}: any) => {
+}: GeneratorModeProps) => {
   const [textInput, setTextInput] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
@@ -78,33 +89,33 @@ export const GeneratorMode = React.memo(({
     setCurrentExtractionProductId(null);
   };
 
-  const handleResultChange = (index: number, field: string, value: any) => {
+  const handleResultChange = (index: number, field: keyof AeMasterItem, value: string | number) => {
     if (!masterResult) return;
     const newAeMaster = [...masterResult.ae_master];
-    
+
     if (field === 'ae_terms_split') {
       newAeMaster[index] = {
         ...newAeMaster[index],
-        ae_terms_split: value.split(/[,，、;]+/).map((t: string) => t.trim()).filter((t: string) => t)
+        ae_terms_split: String(value).split(/[,，、;]+/).map((t) => t.trim()).filter((t) => t)
       };
     } else {
       newAeMaster[index] = { ...newAeMaster[index], [field]: value };
     }
-    
+
     setMasterResult({ ...masterResult, ae_master: newAeMaster });
     setSaveStatus('idle');
   };
 
   const handleDeleteResultItem = (index: number) => {
     if (!masterResult) return;
-    const newAeMaster = masterResult.ae_master.filter((_: any, i: number) => i !== index);
+    const newAeMaster = masterResult.ae_master.filter((_, i) => i !== index);
     setMasterResult({ ...masterResult, ae_master: newAeMaster });
     setSaveStatus('idle');
   };
 
   const handleAddResultItem = () => {
     if (!masterResult) return;
-    const newItem = {
+    const newItem: AeMasterItem = {
       soc: "",
       ae_term_raw: "",
       ae_terms_split: [],
@@ -281,7 +292,7 @@ export const GeneratorMode = React.memo(({
                   </div>
 
                   <div className="space-y-2">
-                      {masterResult.ae_master?.map((item: any, idx: number) => (
+                      {masterResult.ae_master?.map((item, idx) => (
                         <div key={idx} className="bg-white p-3 rounded border border-slate-200 hover:border-brand-300 transition-colors group">
                           <div className="grid grid-cols-12 gap-3 items-start">
                             {/* Column 1: SOC & Frequency */}

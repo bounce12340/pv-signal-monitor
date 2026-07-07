@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, Product, MonitorBatch, SystemLog } from './services/db';
+import { AppMode, ExtractedMaster } from './types';
 import { FileText, Activity, Database, ShieldCheck } from 'lucide-react';
 import { GeneratorMode } from './components/GeneratorMode';
 import { MonitorMode } from './components/MonitorMode';
@@ -8,10 +9,10 @@ import { AuditMode } from './components/AuditMode';
 
 export default function App() {
   // Navigation State
-  const [activeMode, setActiveMode] = useState<'generator' | 'monitor' | 'library' | 'audit'>('generator');
+  const [activeMode, setActiveMode] = useState<AppMode>('generator');
 
   // Shared State
-  const [masterResult, setMasterResult] = useState<any>(null);
+  const [masterResult, setMasterResult] = useState<ExtractedMaster | null>(null);
   const [currentExtractionProductId, setCurrentExtractionProductId] = useState<string | null>(null);
   const [savedProducts, setSavedProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');

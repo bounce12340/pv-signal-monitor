@@ -3,12 +3,21 @@ import { db, Product, LabelAeMaster, MonitorBatch, QuarterlyAeMonitor } from '..
 import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 
+interface LibraryModeProps {
+  savedProducts: Product[];
+  setSavedProducts: React.Dispatch<React.SetStateAction<Product[]>>;
+  monitorBatches: MonitorBatch[];
+  setDbUpdateTrigger: React.Dispatch<React.SetStateAction<number>>;
+  currentExtractionProductId: string | null;
+  setCurrentExtractionProductId: (id: string | null) => void;
+}
+
 export const LibraryMode = React.memo(({
   savedProducts, setSavedProducts,
   monitorBatches,
   setDbUpdateTrigger,
   currentExtractionProductId, setCurrentExtractionProductId
-}: any) => {
+}: LibraryModeProps) => {
   const [viewingProduct, setViewingProduct] = useState<{product: Product, masters: LabelAeMaster[]} | null>(null);
   const [viewingBatch, setViewingBatch] = useState<{batch: MonitorBatch, records: QuarterlyAeMonitor[]} | null>(null);
 
@@ -25,7 +34,7 @@ export const LibraryMode = React.memo(({
   const handleDeleteBatch = (batch: MonitorBatch) => {
      if(confirm(`確定要刪除 ${batch.quarter} 的這份監測報告嗎？`)) {
        db.deleteMonitorBatch(batch.generated_at);
-       setDbUpdateTrigger((prev: number) => prev + 1);
+       setDbUpdateTrigger((prev) => prev + 1);
      }
   };
 
@@ -36,7 +45,7 @@ export const LibraryMode = React.memo(({
       if (currentExtractionProductId === pid) {
         setCurrentExtractionProductId(null);
       }
-      setDbUpdateTrigger((prev: number) => prev + 1);
+      setDbUpdateTrigger((prev) => prev + 1);
     }
   };
 
@@ -68,7 +77,7 @@ export const LibraryMode = React.memo(({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {savedProducts.map((p: any) => (
+                  {savedProducts.map((p) => (
                     <tr key={p.product_id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium">{p.product_name}</td>
                       <td className="px-4 py-3 text-slate-500">{p.label_version_date}</td>
@@ -117,8 +126,8 @@ export const LibraryMode = React.memo(({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {monitorBatches.map((batch: any) => {
-                    const product = savedProducts.find((p: any) => p.product_id === batch.product_id);
+                  {monitorBatches.map((batch) => {
+                    const product = savedProducts.find((p) => p.product_id === batch.product_id);
                     return (
                       <tr key={batch.generated_at} className="hover:bg-slate-50">
                         <td className="px-4 py-3 text-xs text-slate-500">

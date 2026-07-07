@@ -1,7 +1,8 @@
 import React from 'react';
+import { SystemLog } from '../services/db';
 import { ShieldCheck, ScrollText } from 'lucide-react';
 
-export const AuditMode = React.memo(({ systemLogs }: any) => {
+export const AuditMode = React.memo(({ systemLogs }: { systemLogs: SystemLog[] }) => {
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-500 space-y-6">
       <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-slate-200 p-6">
@@ -33,7 +34,7 @@ export const AuditMode = React.memo(({ systemLogs }: any) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {systemLogs.map((log: any) => (
+              {systemLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 text-slate-500 font-mono text-xs whitespace-nowrap">
                       {new Date(log.timestamp).toLocaleString()}
