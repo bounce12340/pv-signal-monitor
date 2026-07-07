@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db, Product, MonitorBatch, SystemLog } from './services/db';
 import { AppMode, ExtractedMaster } from './types';
-import { FileText, Activity, Database, ShieldCheck } from 'lucide-react';
+import { FileText, Activity, Database, ShieldCheck, Settings } from 'lucide-react';
 import { GeneratorMode } from './components/GeneratorMode';
 import { MonitorMode } from './components/MonitorMode';
 import { LibraryMode } from './components/LibraryMode';
 import { AuditMode } from './components/AuditMode';
+import { SettingsModal } from './components/SettingsModal';
 
 export default function App() {
   // Navigation State
@@ -21,6 +22,7 @@ export default function App() {
   
   // Trigger to force re-render of library view when DB changes
   const [dbUpdateTrigger, setDbUpdateTrigger] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Refresh products list
   useEffect(() => {
@@ -93,9 +95,18 @@ export default function App() {
               <ShieldCheck size={16}/>
               稽核日誌
             </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 text-slate-400 hover:text-white hover:bg-slate-700/50"
+              title="系統設定（AI 金鑰、判定規則）"
+            >
+              <Settings size={16}/>
+            </button>
           </div>
         </div>
       </nav>
+
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         {activeMode === 'generator' && (

@@ -1,8 +1,19 @@
-import React from 'react';
-import { SystemLog } from '../services/db';
-import { ShieldCheck, ScrollText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { SystemLog, verifyLogChain, LogChainStatus } from '../services/db';
+import { ShieldCheck, ShieldAlert, ScrollText, Loader2 } from 'lucide-react';
 
 export const AuditMode = React.memo(({ systemLogs }: { systemLogs: SystemLog[] }) => {
+  const [chainStatus, setChainStatus] = useState<LogChainStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setChainStatus(null);
+    verifyLogChain(systemLogs).then((s) => {
+      if (!cancelled) setChainStatus(s);
+    });
+    return () => { cancelled = true; };
+  }, [systemLogs]);
+
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-500 space-y-6">
       <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-slate-200 p-6">
@@ -16,9 +27,32 @@ export const AuditMode = React.memo(({ systemLogs }: { systemLogs: SystemLog[] }
               <p className="text-slate-500 text-sm">GVP 規範要求之系統操作紀錄，僅供檢視，不可修改。</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-500">
-            <ScrollText size={14}/>
-            Total Logs: {systemLogs.length}
+          <div className="flex items-center gap-2">
+            {chainStatus === null ? (
+              <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-400">
+                <Loader2 size={14} className="animate-spin"/> 驗證雜湊鏈中...
+              </div>
+            ) : chainStatus.valid ? (
+              <div
+                className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded text-xs text-green-700"
+                title={`已驗證 ${chainStatus.checked} 筆雜湊鏈紀錄${chainStatus.legacy > 0 ? `；另有 ${chainStatus.legacy} 筆舊格式紀錄（無雜湊，無法驗證）` : ''}`}
+              >
+                <ShieldCheck size={14}/>
+                雜湊鏈完整 ({chainStatus.checked} 筆已驗證{chainStatus.legacy > 0 ? `，${chainStatus.legacy} 筆舊格式` : ''})
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-300 rounded text-xs text-red-700 font-bold"
+                title={`鏈斷裂於紀錄 ID: ${chainStatus.brokenAtId}`}
+              >
+                <ShieldAlert size={14}/>
+                ⚠ 偵測到日誌遭修改或刪除！
+              </div>
+            )}
+            <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-500">
+              <ScrollText size={14}/>
+              Total Logs: {systemLogs.length}
+            </div>
           </div>
         </div>
 

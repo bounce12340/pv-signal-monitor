@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { db, Product, LabelAeMaster, MonitorBatch, QuarterlyAeMonitor } from '../services/db';
-import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity } from 'lucide-react';
+import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity, Download, Upload } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 
 interface LibraryModeProps {
@@ -20,6 +20,43 @@ export const LibraryMode = React.memo(({
 }: LibraryModeProps) => {
   const [viewingProduct, setViewingProduct] = useState<{product: Product, masters: LabelAeMaster[]} | null>(null);
   const [viewingBatch, setViewingBatch] = useState<{batch: MonitorBatch, records: QuarterlyAeMonitor[]} | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportBackup = () => {
+    const backup = db.exportAll();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `PV_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    db.addLog('EXPORT', 'SYSTEM', `Exported full backup (products: ${backup.products.length})`);
+    setDbUpdateTrigger((prev) => prev + 1);
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // Allow re-selecting the same file
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const incoming = Array.isArray(data?.products) ? data.products.length : 0;
+      if (!confirm(
+        `匯入備份將「完全覆蓋」現有全部資料！\n\n` +
+        `目前資料庫：${savedProducts.length} 個產品\n備份檔內含：${incoming} 個產品\n\n確定要匯入嗎？`
+      )) return;
+      const result = db.importAll(data);
+      setSavedProducts(db.getProducts());
+      setCurrentExtractionProductId(null);
+      setDbUpdateTrigger((prev) => prev + 1);
+      alert(`匯入完成：產品 ${result.products} 份、主檔 ${result.masters} 列、監測紀錄 ${result.monitors} 列。`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '匯入失敗：檔案無法解析。');
+    }
+  };
 
   const handleViewProduct = (product: Product) => {
     const masters = db.getLabelAeMasters(product.product_id);
@@ -52,11 +89,36 @@ export const LibraryMode = React.memo(({
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-500 space-y-6">
       <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-slate-200 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="bg-brand-100 p-2 rounded-full text-brand-600">
-            <Database size={24} />
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-brand-100 p-2 rounded-full text-brand-600">
+              <Database size={24} />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900">資料庫檢視</h2>
           </div>
-          <h2 className="text-xl font-bold text-slate-900">資料庫檢視</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={handleExportBackup}
+              className="text-xs px-3 py-2 rounded font-medium flex items-center gap-1.5 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors"
+              title="下載全部資料的 JSON 備份檔"
+            >
+              <Download size={14} /> 匯出備份
+            </button>
+            <button
+              onClick={() => importInputRef.current?.click()}
+              className="text-xs px-3 py-2 rounded font-medium flex items-center gap-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+              title="從 JSON 備份檔還原（覆蓋現有資料）"
+            >
+              <Upload size={14} /> 匯入備份
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportBackup}
+              className="hidden"
+            />
+          </div>
         </div>
 
         <div className="space-y-8">

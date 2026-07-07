@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { extractAEMaster, FileInput } from '../services/gemini';
+import { extractAEMaster, FileInput } from '../services/ai';
 import { db, Product } from '../services/db';
 import { AeMasterItem } from '../services/analysis';
 import { ExtractedMaster } from '../types';

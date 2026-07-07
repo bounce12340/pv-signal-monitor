@@ -42,10 +42,14 @@ export interface QuarterlyAeMonitor {
 export interface SystemLog {
   id: string;
   timestamp: string;
-  action_type: 'CREATE' | 'UPDATE' | 'DELETE' | 'EXPORT' | 'LOGIN' | 'ANALYSIS';
+  action_type: 'CREATE' | 'UPDATE' | 'DELETE' | 'EXPORT' | 'IMPORT' | 'LOGIN' | 'ANALYSIS';
   module: 'PRODUCT' | 'MONITOR' | 'SYSTEM';
   description: string;
   user?: string; // Placeholder for future auth
+  // Tamper-evident hash chain: hash = SHA-256 of the entry incl. prev_hash.
+  // Optional because logs written before this feature have neither field.
+  prev_hash?: string;
+  hash?: string;
 }
 
 // Helper interface for grouped batches
@@ -88,32 +92,90 @@ function saveToStorageAndCache<T>(key: string, data: T[]) {
   }
 }
 
+// --- Audit log hash chain ---
+
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Canonical payload covered by the hash. Field order is fixed on purpose —
+// changing it invalidates every existing chain.
+export function logHashPayload(log: SystemLog): string {
+  return JSON.stringify({
+    id: log.id,
+    timestamp: log.timestamp,
+    action_type: log.action_type,
+    module: log.module,
+    description: log.description,
+    user: log.user || '',
+    prev_hash: log.prev_hash || '',
+  });
+}
+
+export interface LogChainStatus {
+  valid: boolean;
+  checked: number;   // hashed entries verified
+  legacy: number;    // pre-hash-chain entries (cannot be verified)
+  brokenAtId?: string;
+}
+
+// Verify the chain oldest → newest. Legacy (unhashed) entries are only
+// tolerated before the first hashed entry.
+export async function verifyLogChain(logs: SystemLog[]): Promise<LogChainStatus> {
+  const ordered = [...logs].reverse(); // stored newest-first
+  let legacy = 0;
+  let checked = 0;
+  let prevHash: string | null = null;
+
+  for (const log of ordered) {
+    if (!log.hash) {
+      if (checked > 0) return { valid: false, checked, legacy, brokenAtId: log.id };
+      legacy++;
+      continue;
+    }
+    if ((log.prev_hash || 'GENESIS') !== (prevHash ?? 'GENESIS')) {
+      return { valid: false, checked, legacy, brokenAtId: log.id };
+    }
+    if ((await sha256Hex(logHashPayload(log))) !== log.hash) {
+      return { valid: false, checked, legacy, brokenAtId: log.id };
+    }
+    prevHash = log.hash;
+    checked++;
+  }
+  return { valid: true, checked, legacy };
+}
+
+// Serialized writer so concurrent addLog calls never race the chain order.
+let logWriteQueue: Promise<void> = Promise.resolve();
+
 // --- Data Access Layer ---
 
 export const db = {
   // --- LOGGING SYSTEM ---
+  // Fire-and-forget: hashing is async, callers stay synchronous.
   addLog: (action: SystemLog['action_type'], module: SystemLog['module'], description: string) => {
-    const logs = db.getLogs();
-    const newLog: SystemLog = {
-      id: generateId(),
-      timestamp: new Date().toISOString(),
-      action_type: action,
-      module: module,
-      description: description,
-      user: 'System User' // In a real app, this would come from auth context
-    };
-    // Keep logs sorted desc (newest first)
-    logs.unshift(newLog);
-    saveToStorageAndCache(DB_KEYS.LOGS, logs);
+    logWriteQueue = logWriteQueue
+      .then(async () => {
+        const logs = db.getLogs();
+        const entry: SystemLog = {
+          id: generateId(),
+          timestamp: new Date().toISOString(),
+          action_type: action,
+          module: module,
+          description: description,
+          user: 'System User', // In a real app, this would come from auth context
+          prev_hash: logs[0]?.hash || 'GENESIS',
+        };
+        entry.hash = await sha256Hex(logHashPayload(entry));
+        // Keep logs sorted desc (newest first)
+        saveToStorageAndCache(DB_KEYS.LOGS, [entry, ...logs]);
+      })
+      .catch((err) => console.error('Audit log write failed:', err));
   },
 
   getLogs: (): SystemLog[] => {
     return getFromCacheOrStorage<SystemLog>(DB_KEYS.LOGS);
-  },
-
-  clearLogs: () => {
-     delete cache[DB_KEYS.LOGS];
-     localStorage.removeItem(DB_KEYS.LOGS);
   },
 
   // Products
@@ -258,6 +320,39 @@ export const db = {
     const current = db.getQuarterlyAeMonitors();
     const updated = current.filter(m => m.id !== recordId);
     saveToStorageAndCache(DB_KEYS.MONITOR, updated);
+  },
+
+  // --- Backup / Restore ---
+
+  exportAll: () => ({
+    schema: 'pv-signal-monitor-backup',
+    version: 1,
+    exported_at: new Date().toISOString(),
+    products: db.getProducts(),
+    label_ae_master: db.getLabelAeMasters(),
+    quarterly_ae_monitor: db.getQuarterlyAeMonitors(),
+    system_logs: db.getLogs(),
+  }),
+
+  // Replaces ALL local data with the backup content. Caller must confirm first.
+  importAll: (data: unknown): { products: number; masters: number; monitors: number; logs: number } => {
+    const d = data as Record<string, unknown>;
+    if (!d || d.schema !== 'pv-signal-monitor-backup' || !Array.isArray(d.products)) {
+      throw new Error('檔案格式不正確：不是本系統的備份檔。');
+    }
+    const products = d.products as Product[];
+    const masters = (Array.isArray(d.label_ae_master) ? d.label_ae_master : []) as LabelAeMaster[];
+    const monitors = (Array.isArray(d.quarterly_ae_monitor) ? d.quarterly_ae_monitor : []) as QuarterlyAeMonitor[];
+    const logs = (Array.isArray(d.system_logs) ? d.system_logs : []) as SystemLog[];
+
+    saveToStorageAndCache(DB_KEYS.PRODUCTS, products);
+    saveToStorageAndCache(DB_KEYS.MASTER, masters);
+    saveToStorageAndCache(DB_KEYS.MONITOR, monitors);
+    saveToStorageAndCache(DB_KEYS.LOGS, logs);
+
+    db.addLog('IMPORT', 'SYSTEM',
+      `Restored backup (products: ${products.length}, master rows: ${masters.length}, monitor rows: ${monitors.length})`);
+    return { products: products.length, masters: masters.length, monitors: monitors.length, logs: logs.length };
   },
 
   // --- High Level Actions ---
