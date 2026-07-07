@@ -47,7 +47,14 @@ export const GeneratorMode = React.memo(({
   const [batchRunning, setBatchRunning] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
+    const fileList = e.target.files;
+    const files: File[] = [];
+    if (fileList) {
+      for (let i = 0; i < fileList.length; i++) {
+        const f = fileList.item(i);
+        if (f) files.push(f);
+      }
+    }
     e.target.value = ''; // allow re-selecting the same file(s)
     if (files.length === 0) return;
 
