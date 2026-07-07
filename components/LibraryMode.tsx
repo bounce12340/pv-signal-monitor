@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { db, Product, LabelAeMaster, MonitorBatch, QuarterlyAeMonitor } from '../services/db';
-import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity, Download, Upload } from 'lucide-react';
+import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity, Download, Upload, TrendingUp } from 'lucide-react';
 import { DetailModal } from './DetailModal';
+import { TrendView } from './TrendView';
 
 interface LibraryModeProps {
   savedProducts: Product[];
@@ -20,7 +21,12 @@ export const LibraryMode = React.memo(({
 }: LibraryModeProps) => {
   const [viewingProduct, setViewingProduct] = useState<{product: Product, masters: LabelAeMaster[]} | null>(null);
   const [viewingBatch, setViewingBatch] = useState<{batch: MonitorBatch, records: QuarterlyAeMonitor[]} | null>(null);
+  const [viewingTrend, setViewingTrend] = useState<{product: Product, records: QuarterlyAeMonitor[]} | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  const handleViewTrend = (product: Product) => {
+    setViewingTrend({ product, records: db.getQuarterlyAeMonitors(product.product_id) });
+  };
 
   const handleExportBackup = () => {
     const backup = db.exportAll();
@@ -145,12 +151,19 @@ export const LibraryMode = React.memo(({
                       <td className="px-4 py-3 text-slate-500">{p.label_version_date}</td>
                       <td className="px-4 py-3 text-xs font-mono text-slate-400">{p.product_id}</td>
                       <td className="px-4 py-3 text-right flex justify-end gap-2">
-                        <button 
+                        <button
                           onClick={() => handleViewProduct(p)}
                           className="text-brand-600 bg-brand-50 hover:bg-brand-100 p-1.5 rounded transition-colors"
                           title="檢視詳細主檔"
                         >
                           <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleViewTrend(p)}
+                          className="text-emerald-600 bg-emerald-50 hover:bg-emerald-100 p-1.5 rounded transition-colors"
+                          title="跨季趨勢分析"
+                        >
+                          <TrendingUp size={16} />
                         </button>
                         <button 
                           onClick={() => handleDeleteProduct(p.product_id)} 
@@ -281,6 +294,15 @@ export const LibraryMode = React.memo(({
               </table>
           </div>
         )}
+      </DetailModal>
+
+      {/* Trend Analysis Modal */}
+      <DetailModal
+        isOpen={!!viewingTrend}
+        onClose={() => setViewingTrend(null)}
+        title={viewingTrend ? `跨季趨勢分析：${viewingTrend.product.product_name}` : ''}
+      >
+        {viewingTrend && <TrendView records={viewingTrend.records} />}
       </DetailModal>
 
       {/* Batch Report Modal */}
