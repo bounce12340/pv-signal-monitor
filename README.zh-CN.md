@@ -46,11 +46,8 @@
    npm install
    ```
 
-3. 配置环境变量：
-   在项目根目录创建一个 `.env` 或 `.env.local` 文件，并填入您的 Gemini API Key：
-   ```env
-   API_KEY=您的_gemini_api_key
-   ```
+3. 配置 AI 供应商：
+   不再需要 `.env` 文件。启动开发服务器后，点击界面右上角的齿轮图标（设置），填入供应商／模型／API Key。密钥仅保存在您浏览器的 localStorage 中。
 
 4. 启动开发服务器：
    ```bash
