@@ -3,7 +3,8 @@ import { performAnalysis, AnalysisReport } from '../services/analysis';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
 import { settings } from '../services/settings';
 import { AppMode, ExtractedMaster } from '../types';
-import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle } from 'lucide-react';
+import { openPrintReport } from './printReport';
+import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer } from 'lucide-react';
 
 interface CountRow { term: string; count: string; serious: boolean; }
 
@@ -181,6 +182,26 @@ export const MonitorMode = React.memo(({
     document.body.removeChild(link);
 
     db.addLog('EXPORT', 'MONITOR', `Exported CSV Analysis Report for ${quarter} (Rows: ${analysisReport.rows.length})`);
+    setDbUpdateTrigger((prev) => prev + 1);
+  };
+
+  const handlePrintReport = () => {
+    if (!analysisReport) return;
+    const product = savedProducts.find((p) => p.product_id === selectedProductId);
+    const ok = openPrintReport({
+      productName: product?.product_name || masterResult?.product_name || '(未命名產品)',
+      quarter,
+      exposureVal,
+      exposureUnit,
+      salesVolume,
+      dailyDosage,
+      report: analysisReport,
+    });
+    if (!ok) {
+      alert('瀏覽器攔截了彈出視窗，請允許本網站的彈出視窗後重試。');
+      return;
+    }
+    db.addLog('EXPORT', 'MONITOR', `Opened printable report for ${quarter} (Rows: ${analysisReport.rows.length})`);
     setDbUpdateTrigger((prev) => prev + 1);
   };
 
@@ -467,12 +488,20 @@ export const MonitorMode = React.memo(({
                     <div className="text-xs text-slate-400">
                       Exposure: {exposureVal} {exposureUnit}
                     </div>
-                    <button 
+                    <button
                     onClick={handleExportCSV}
                     className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1 transition-colors bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
                   >
                     <Download size={14}/>
                     匯出 CSV
+                  </button>
+                    <button
+                    onClick={handlePrintReport}
+                    className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1 transition-colors bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                    title="開啟列印版報告（可另存為 PDF），含判定規則與簽核欄"
+                  >
+                    <Printer size={14}/>
+                    列印報告
                   </button>
                     {selectedProductId && (
                       <button 
