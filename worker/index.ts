@@ -5,6 +5,11 @@
 
 interface Env {
   ASSETS: { fetch: typeof fetch };
+  // Set via `wrangler secret put OLLAMA_API_KEY`. Injected only when the
+  // client sends no Authorization header, so a browser-stored key still wins.
+  // Safe to inject because the only route (pv.uic-ai.com) sits behind
+  // Cloudflare Access; workers.dev is disabled in wrangler.jsonc.
+  OLLAMA_API_KEY?: string;
 }
 
 // Only the Ollama API surfaces the app actually uses.
@@ -26,6 +31,7 @@ export default {
       const headers = new Headers();
       const auth = request.headers.get('Authorization');
       if (auth) headers.set('Authorization', auth);
+      else if (env.OLLAMA_API_KEY) headers.set('Authorization', `Bearer ${env.OLLAMA_API_KEY}`);
       const contentType = request.headers.get('Content-Type');
       if (contentType) headers.set('Content-Type', contentType);
 

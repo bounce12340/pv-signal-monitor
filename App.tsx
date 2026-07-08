@@ -147,6 +147,10 @@ export default function App() {
           <AuditMode systemLogs={systemLogs} />
         )}
       </div>
+
+      <footer className="max-w-6xl mx-auto px-4 pb-6 text-center text-[11px] text-slate-400">
+        PV 智慧監測平台 · build {__BUILD_INFO__}
+      </footer>
     </div>
   );
 }

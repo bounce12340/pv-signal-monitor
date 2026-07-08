@@ -51,6 +51,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
           </h4>
           <p className="text-xs text-slate-500">
             金鑰只儲存在您這台電腦的瀏覽器 (localStorage)，不會寫入程式碼或上傳到任何伺服器。
+            正式站選「Ollama Cloud」時可留空金鑰——伺服器端已代管。
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
@@ -88,7 +89,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
               type="password"
               value={ai.apiKey}
               onChange={(e) => setAi({ ...ai, apiKey: e.target.value })}
-              placeholder={ai.provider === 'openai-compatible' ? '本地 Ollama 可留空' : 'AIza...'}
+              placeholder={ai.provider === 'openai-compatible' ? '本地 Ollama / 正式站 Ollama Cloud 可留空' : 'AIza...'}
               className={`${inputCls} font-mono`}
             />
           </div>
@@ -117,7 +118,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 <button
                   onClick={() => setAi({ ...ai, baseUrl: OLLAMA_CLOUD_URL })}
                   className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
-                  title="走 Vite 代理連 ollama.com（瀏覽器無法直連，僅本機開發/預覽伺服器可用）"
+                  title="走 /ollama-cloud 代理連 ollama.com（開發伺服器與正式站皆可；正式站伺服器端已備金鑰，可不填）"
                 >
                   Ollama Cloud
                 </button>

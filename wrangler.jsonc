@@ -6,6 +6,10 @@
   "routes": [
     { "pattern": "pv.uic-ai.com", "custom_domain": true }
   ],
+  // Access only protects the custom domain. With OLLAMA_API_KEY injected by
+  // the Worker, the workers.dev URL would be an open proxy — keep it off.
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
