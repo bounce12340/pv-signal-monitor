@@ -1,4 +1,5 @@
 import type { AnalysisReport } from '../services/analysis';
+import { formatCI } from '../services/stats';
 
 export interface PrintReportInput {
   productName: string;
@@ -34,6 +35,7 @@ export function openPrintReport(input: PrintReportInput): boolean {
       <td>${esc(row.soc)}<br><small>${esc(row.frequency_category)}</small></td>
       <td class="num">${row.count}</td>
       <td class="num">${row.incidence_rate_pct.toFixed(4)}%</td>
+      <td class="num">${esc(formatCI(row.ci_95))}</td>
       <td class="num">${row.threshold_pct > 0 ? row.threshold_pct + '%' : '–'}</td>
     </tr>`).join('');
 
@@ -88,7 +90,7 @@ export function openPrintReport(input: PrintReportInput): boolean {
 
   <table>
     <thead>
-      <tr><th>判定</th><th>AE Term</th><th>SOC / 仿單頻率</th><th>案例數</th><th>發生率</th><th>仿單門檻</th></tr>
+      <tr><th>判定</th><th>AE Term</th><th>SOC / 仿單頻率</th><th>案例數</th><th>發生率</th><th>95% CI (Poisson)</th><th>仿單門檻</th></tr>
     </thead>
     <tbody>${rowsHtml || '<tr><td colspan="6" style="text-align:center;color:#777">本季無不良反應案例</td></tr>'}</tbody>
   </table>

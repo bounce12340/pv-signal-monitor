@@ -1,4 +1,5 @@
 import { SignalRuleConfig, DEFAULT_RULE_CONFIG } from './settings';
+import { poissonRateCI95, RateCI } from './stats';
 
 export interface AeMasterItem {
   soc: string;
@@ -30,6 +31,8 @@ export interface AnalysisResultRow {
   serious: boolean;
   exposure_display: string;
   incidence_rate_pct: number;
+  // Exact (Garwood) Poisson 95% CI of the incidence rate, in %.
+  ci_95: RateCI | null;
   status: 'alert' | 'warning' | 'normal' | 'unexpected';
   // True when the rate reached the warning zone but the count was below the
   // configured minimum case count, so the status was kept at normal.
@@ -131,6 +134,7 @@ export function performAnalysis(
         serious: !!serious,
         exposure_display: `${exposure_value} ${exposure_unit}`,
         incidence_rate_pct: (count / exposure_value) * 100,
+        ci_95: poissonRateCI95(count, exposure_value),
         status: 'unexpected',
         noise_suppressed: false,
         suggestion,
@@ -170,6 +174,7 @@ export function performAnalysis(
       serious: !!serious,
       exposure_display: `${exposure_value} ${exposure_unit}`,
       incidence_rate_pct: incidenceRate,
+      ci_95: poissonRateCI95(count, exposure_value),
       status,
       noise_suppressed: noiseSuppressed,
       original_master: item
@@ -192,6 +197,7 @@ export function performAnalysis(
             serious: false,
             exposure_display: `${exposure_value} ${exposure_unit}`,
             incidence_rate_pct: 0,
+            ci_95: poissonRateCI95(0, exposure_value),
             status: 'normal',
             noise_suppressed: false,
             original_master: item

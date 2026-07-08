@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { performAnalysis, AnalysisReport } from '../services/analysis';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
 import { settings } from '../services/settings';
+import { formatCI } from '../services/stats';
 import { AppMode, ExtractedMaster } from '../types';
 import { openPrintReport } from './printReport';
 import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer } from 'lucide-react';
@@ -148,7 +149,7 @@ export const MonitorMode = React.memo(({
     if (!analysisReport) return;
 
     const BOM = "\uFEFF"; 
-    const headers = ["判定 (Status)", "AE Term", "SOC", "仿單頻率 (Label Freq)", "嚴重 (Serious)", "本季案例數 (Count)", "發生率 (Rate %)", "仿單門檻 (Threshold %)", "備註 (Note)"];
+    const headers = ["判定 (Status)", "AE Term", "SOC", "仿單頻率 (Label Freq)", "嚴重 (Serious)", "本季案例數 (Count)", "發生率 (Rate %)", "95% CI (Poisson exact)", "仿單門檻 (Threshold %)", "備註 (Note)"];
 
     const rows = analysisReport.rows.map(row => {
       let statusText = 'Normal';
@@ -164,6 +165,7 @@ export const MonitorMode = React.memo(({
         row.serious ? 'Y' : '',
         row.count,
         row.incidence_rate_pct.toFixed(4),
+        `"${formatCI(row.ci_95)}"`,
         row.threshold_pct,
         row.noise_suppressed ? `"n<${analysisReport.rules.minCaseCount} noise-suppressed"` : ''
       ].join(",");
@@ -548,7 +550,7 @@ export const MonitorMode = React.memo(({
                           <th className="px-4 py-3">AE Term</th>
                           <th className="px-4 py-3">SOC / 仿單頻率</th>
                           <th className="px-4 py-3 text-right">本季 Count</th>
-                          <th className="px-4 py-3 text-right">本季 Rate (%)</th>
+                          <th className="px-4 py-3 text-right">本季 Rate (%)<br /><span className="font-normal text-[10px] text-slate-400">95% CI (Poisson)</span></th>
                           <th className="px-4 py-3 text-right">仿單門檻 (%)</th>
                         </tr>
                       </thead>
@@ -613,6 +615,12 @@ export const MonitorMode = React.memo(({
                               'text-slate-700'
                             }`}>
                               {row.incidence_rate_pct.toFixed(4)}%
+                              <div
+                                className="font-normal text-[10px] text-slate-400"
+                                title="發生率的 Poisson exact 95% 信賴區間"
+                              >
+                                {formatCI(row.ci_95)}
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-right font-mono text-slate-500">
                               {row.threshold_pct > 0 ? `${row.threshold_pct}%` : '-'}
