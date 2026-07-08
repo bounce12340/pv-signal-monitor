@@ -73,9 +73,25 @@ npm test
 ## 🔌 AI Provider Notes
 
 - **Gemini (default):** full support including PDF upload and structured JSON output.
-- **OpenAI-compatible endpoints:** text and image inputs are supported; PDF upload is not (paste the label text or upload images instead). Quick presets for OpenRouter (`https://openrouter.ai/api/v1`) and local Ollama (`http://localhost:11434/v1`) are built into the Settings dialog.
+- **OpenAI-compatible endpoints:** text and image inputs are supported. PDFs are handled by extracting the text layer in the browser (pdf.js); pure scans still need a vision-capable model or Gemini. Quick presets for OpenRouter (`https://openrouter.ai/api/v1`), local Ollama (`http://localhost:11434/v1`), and Ollama Cloud (proxied via `/ollama-cloud/v1`) are built into the Settings dialog.
 - **Ollama (local/private data):** run Ollama locally and pick a vision-capable model for image extraction. You may need to configure CORS (`OLLAMA_ORIGINS`) to allow requests from the Vite dev server.
 
 ## ⚠️ Data Durability
 
-All data lives in your browser's localStorage. Clearing site data erases everything — use **Library Mode → 匯出備份 (Export Backup)** regularly, and import the JSON file to restore.
+All working data lives in your browser's localStorage. Use **Library Mode → 匯出備份 (Export Backup)** regularly, and import the JSON file to restore. When deployed on Cloudflare (below), the sync widget in the nav bar additionally pushes snapshots to D1 (last 20 kept per user), enabling cross-device sync and point-in-time recovery.
+
+## ☁️ Deployment (Cloudflare Workers)
+
+The app deploys as a Worker with static assets (`wrangler.jsonc`):
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+Components:
+
+- **Static assets + SPA fallback** served directly; only `/ollama-cloud/*` (CORS proxy to ollama.com) and `/api/*` (sync) invoke the Worker.
+- **Server-side Ollama key (optional):** `npx wrangler secret put OLLAMA_API_KEY` lets browsers use the Ollama Cloud preset without storing a key locally. Only do this if the site is protected by Cloudflare Access — `workers_dev` is disabled in `wrangler.jsonc` for exactly this reason.
+- **Cross-device sync:** requires a D1 database (`npx wrangler d1 create pv-signal-monitor`, then create the `snapshots` table — see `worker/index.ts`) and Cloudflare Access in front of the domain; user identity comes from the `Cf-Access-Authenticated-User-Email` header.
+- **CI/CD:** `.github/workflows/ci.yml` runs typecheck/tests/build on every push and auto-deploys `main` when the `CLOUDFLARE_API_TOKEN` (+ optional `CLOUDFLARE_ACCOUNT_ID`) repo secrets are set.
