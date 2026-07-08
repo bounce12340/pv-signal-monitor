@@ -8,6 +8,7 @@ import { MonitorMode } from './components/MonitorMode';
 import { LibraryMode } from './components/LibraryMode';
 import { AuditMode } from './components/AuditMode';
 import { SettingsModal } from './components/SettingsModal';
+import { SyncWidget } from './components/SyncWidget';
 
 export default function App() {
   // Navigation State
@@ -112,6 +113,10 @@ export default function App() {
             >
               <Settings size={16}/>
             </button>
+            <SyncWidget
+              refreshKey={`${activeMode}-${dbUpdateTrigger}`}
+              onPulled={() => setDbUpdateTrigger((prev) => prev + 1)}
+            />
           </div>
         </div>
       </nav>

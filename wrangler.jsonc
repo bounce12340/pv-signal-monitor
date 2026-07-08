@@ -10,13 +10,20 @@
   // the Worker, the workers.dev URL would be an open proxy — keep it off.
   "workers_dev": false,
   "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pv-signal-monitor",
+      "database_id": "ba40bffa-f460-4aa5-8ba9-24141688c1eb"
+    }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    // Only the Ollama proxy invokes the Worker; all static assets are served
-    // directly (cheaper, and navigation requests skip the Worker entirely).
-    "run_worker_first": ["/ollama-cloud/*"]
+    // Only the Ollama proxy and the sync API invoke the Worker; all static
+    // assets are served directly (cheaper, navigations skip the Worker).
+    "run_worker_first": ["/ollama-cloud/*", "/api/*"]
   },
   "observability": {
     "enabled": true
