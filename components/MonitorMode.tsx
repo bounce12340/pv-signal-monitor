@@ -255,6 +255,7 @@ export const MonitorMode = React.memo(({
           rate_pct: row.incidence_rate_pct,
           threshold_pct: row.threshold_pct,
           status: status,
+          unexpected: row.status === 'unexpected',
           generated_at: now,
           rule_snapshot: ruleSnapshot
         });

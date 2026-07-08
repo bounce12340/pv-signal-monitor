@@ -1,6 +1,6 @@
 import type { AeMasterItem } from './services/analysis';
 
-export type AppMode = 'generator' | 'monitor' | 'library' | 'audit';
+export type AppMode = 'dashboard' | 'generator' | 'monitor' | 'library' | 'audit';
 
 // Shape of an AI extraction result / editable master, before it is
 // flattened into LabelAeMaster rows by db.saveExtractedMaster.

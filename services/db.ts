@@ -37,6 +37,9 @@ export interface QuarterlyAeMonitor {
   rate_pct: number;
   threshold_pct: number;
   status: 'normal' | 'yellow' | 'red'; // Simplified status as per requirement (mapped from internal)
+  // True when the term was not in the label master (stored as 'red' in
+  // status). Optional: records saved before this field default to false.
+  unexpected?: boolean;
   generated_at: string;
   // Signal rule parameters in force when this record was generated (audit trail)
   rule_snapshot?: string;
@@ -289,7 +292,9 @@ export const db = {
 
       const batch = batches.get(key)!;
       batch.record_count++;
-      if (record.status === 'red') {
+      if (record.unexpected) {
+        batch.unexpected_count++;
+      } else if (record.status === 'red') {
         batch.alert_count++;
       }
     });

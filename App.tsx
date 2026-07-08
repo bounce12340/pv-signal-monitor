@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db, Product, MonitorBatch, SystemLog } from './services/db';
 import { AppMode, ExtractedMaster } from './types';
-import { FileText, Activity, Database, ShieldCheck, Settings } from 'lucide-react';
+import { FileText, Activity, Database, ShieldCheck, Settings, LayoutDashboard } from 'lucide-react';
+import { DashboardMode } from './components/DashboardMode';
 import { GeneratorMode } from './components/GeneratorMode';
 import { MonitorMode } from './components/MonitorMode';
 import { LibraryMode } from './components/LibraryMode';
@@ -10,7 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 
 export default function App() {
   // Navigation State
-  const [activeMode, setActiveMode] = useState<AppMode>('generator');
+  const [activeMode, setActiveMode] = useState<AppMode>('dashboard');
 
   // Shared State
   const [masterResult, setMasterResult] = useState<ExtractedMaster | null>(null);
@@ -59,6 +60,15 @@ export default function App() {
             <span className="font-bold text-lg tracking-tight">PV 智慧監測平台</span>
           </div>
           <div className="flex gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700">
+            <button
+              onClick={() => setActiveMode('dashboard')}
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
+                activeMode === 'dashboard' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <LayoutDashboard size={16}/>
+              總覽
+            </button>
             <button
               onClick={() => setActiveMode('generator')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
@@ -109,6 +119,15 @@ export default function App() {
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <div className="max-w-6xl mx-auto p-4 md:p-8">
+        {activeMode === 'dashboard' && (
+          <DashboardMode
+            savedProducts={savedProducts}
+            monitorBatches={monitorBatches}
+            setSelectedProductId={setSelectedProductId}
+            setActiveMode={setActiveMode}
+          />
+        )}
+
         {activeMode === 'generator' && (
           <GeneratorMode 
             masterResult={masterResult} 
