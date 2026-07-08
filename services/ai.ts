@@ -198,6 +198,114 @@ async function extractWithOpenAiCompatible(
   return normalizeResult(JSON.parse(fenced ? fenced[1] : text));
 }
 
+// --- AI term normalization (synonym-level mapping to master terms) ---
+
+const MAPPING_INSTRUCTION = `你是藥品安全監視（PV）詞彙對應專家。使用者提供「主檔詞彙清單」與「待對應詞彙」。
+對每個待對應詞彙，判斷它是否為主檔中某個詞彙的同義詞、俗名、簡寫或錯字（語意上指同一個不良反應，例如「拉肚子」→「腹瀉」）。
+- 是 → 回該主檔詞彙（必須逐字取自主檔清單，不可自創）。
+- 否或不確定 → 回 null，不要勉強配對。
+回傳純 JSON：{"mappings":[{"input":"...","master":"主檔詞彙或 null"}]}`;
+
+const MAPPING_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    mappings: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          input: { type: Type.STRING },
+          master: { type: Type.STRING, nullable: true },
+        },
+        required: ["input"],
+      },
+    },
+  },
+  required: ["mappings"],
+};
+
+/**
+ * Asks the configured model to map unmatched AE terms onto master terms at
+ * synonym level. Returns input → master term (or null). Any answer not
+ * literally present in `masterTerms` is discarded, so the model cannot
+ * invent vocabulary.
+ */
+export async function mapTermsToMaster(
+  inputs: string[],
+  masterTerms: string[]
+): Promise<Record<string, string | null>> {
+  const ai = settings.getAi();
+  if (!ai.apiKey && ai.provider === "gemini") {
+    throw new Error("尚未設定 API Key。請點右上角「設定」填入您的金鑰。");
+  }
+  if (ai.provider === "openai-compatible" && !ai.baseUrl) {
+    throw new Error("尚未設定 API 端點 (Base URL)。請點右上角「設定」。");
+  }
+  if (!ai.model) throw new Error("尚未設定模型名稱。請點右上角「設定」。");
+
+  const userText =
+    `主檔詞彙清單：\n${masterTerms.join("、")}\n\n待對應詞彙：\n${inputs.join("、")}`;
+
+  let rawText: string;
+  if (ai.provider === "gemini") {
+    const genai = new GoogleGenAI({ apiKey: ai.apiKey });
+    const response = await genai.models.generateContent({
+      model: ai.model,
+      contents: { role: "user", parts: [{ text: userText }] },
+      config: {
+        systemInstruction: MAPPING_INSTRUCTION,
+        responseMimeType: "application/json",
+        responseSchema: MAPPING_SCHEMA,
+        temperature: 0,
+      },
+    });
+    rawText = (response.text || "").trim();
+  } else {
+    const url = `${ai.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(ai.apiKey ? { Authorization: `Bearer ${ai.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: ai.model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: MAPPING_INSTRUCTION },
+          { role: "user", content: userText },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`API 回應 ${res.status}：${body.slice(0, 300)}`);
+    }
+    const json = await res.json();
+    rawText = json?.choices?.[0]?.message?.content || "";
+  }
+  if (!rawText) throw new Error("模型未回傳內容。");
+
+  const fenced = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  const parsed = JSON.parse(fenced ? fenced[1] : rawText) as {
+    mappings?: Array<{ input?: unknown; master?: unknown }>;
+  };
+
+  const lookup = new Map(masterTerms.map((t) => [t.toLowerCase().trim(), t]));
+  const out: Record<string, string | null> = {};
+  inputs.forEach((t) => { out[t] = null; });
+  (parsed.mappings || []).forEach((m) => {
+    if (!m || typeof m.input !== "string" || !(m.input in out)) return;
+    const hit =
+      typeof m.master === "string"
+        ? lookup.get(m.master.toLowerCase().trim())
+        : undefined;
+    out[m.input] = hit ?? null;
+  });
+  return out;
+}
+
 export async function extractAEMaster(
   textInput: string,
   fileInput?: FileInput

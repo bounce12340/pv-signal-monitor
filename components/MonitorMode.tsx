@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { performAnalysis, AnalysisReport } from '../services/analysis';
+import { mapTermsToMaster } from '../services/ai';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
 import { settings } from '../services/settings';
 import { formatCI } from '../services/stats';
 import { AppMode, ExtractedMaster } from '../types';
 import { openPrintReport } from './printReport';
-import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer } from 'lucide-react';
+import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer, Sparkles, Loader2 } from 'lucide-react';
 
 interface CountRow { term: string; count: string; serious: boolean; }
 
@@ -97,6 +98,29 @@ export const MonitorMode = React.memo(({
     }
   };
 
+  // AI synonym-level mapping of unmatched terms onto the master vocabulary.
+  const [aiMappings, setAiMappings] = useState<Record<string, string | null>>({});
+  const [aiMapLoading, setAiMapLoading] = useState(false);
+  const [aiMapError, setAiMapError] = useState<string | null>(null);
+
+  const handleAiNormalize = async () => {
+    if (!analysisReport || !masterResult || aiMapLoading) return;
+    const masterTerms = masterResult.ae_master.flatMap((i) => i.ae_terms_split);
+    setAiMapLoading(true);
+    setAiMapError(null);
+    try {
+      const result = await mapTermsToMaster(analysisReport.unmatched, masterTerms);
+      setAiMappings(result);
+      const found = Object.values(result).filter(Boolean).length;
+      db.addLog('ANALYSIS', 'MONITOR',
+        `AI term normalization: ${analysisReport.unmatched.length} unmatched, ${found} mapped`);
+    } catch (e) {
+      setAiMapError(e instanceof Error ? e.message : 'AI 正名失敗，請重試。');
+    } finally {
+      setAiMapLoading(false);
+    }
+  };
+
   // Replace an unmatched input term with the suggested master term and re-run.
   const handleAdoptSuggestion = (originalTerm: string, suggestedTerm: string) => {
     const newRows = inputCounts.map((r) =>
@@ -142,6 +166,8 @@ export const MonitorMode = React.memo(({
       `rules: minN=${rules.minCaseCount}, alertX=${rules.alertMultiplier}, buffer=${rules.toleranceMarginPct}%)`);
 
     setAnalysisReport(report);
+    setAiMappings({});
+    setAiMapError(null);
     setMonitorSaveStatus('idle');
   };
 
@@ -542,6 +568,29 @@ export const MonitorMode = React.memo(({
                     </div>
                   </div>
 
+                  {/* AI term normalization for unmatched terms */}
+                  {analysisReport.unmatched.length > 0 && (
+                    <div className="mb-4 p-3 bg-violet-50 border border-violet-200 rounded-lg text-sm flex flex-wrap items-center gap-3">
+                      <span className="text-violet-800">
+                        有 {analysisReport.unmatched.length} 個詞彙未匹配主檔——可請 AI 檢查是否為主檔詞彙的同義詞（如「拉肚子」→「腹瀉」）。
+                      </span>
+                      <button
+                        onClick={handleAiNormalize}
+                        disabled={aiMapLoading}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {aiMapLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                        {aiMapLoading ? 'AI 比對中...' : 'AI 詞彙正名'}
+                      </button>
+                      {Object.keys(aiMappings).length > 0 && !aiMapLoading && (
+                        <span className="text-xs text-violet-600">
+                          已比對：{Object.values(aiMappings).filter(Boolean).length} 個可對應，結果顯示於下表。
+                        </span>
+                      )}
+                      {aiMapError && <span className="text-xs text-red-600">{aiMapError}</span>}
+                    </div>
+                  )}
+
                   {/* Table */}
                   <div className="overflow-x-auto border rounded-lg border-slate-200 max-h-[600px]">
                     <table className="w-full text-sm text-left relative">
@@ -600,6 +649,21 @@ export const MonitorMode = React.memo(({
                                     >
                                       是否即為「{row.suggestion.term}」？點此採用
                                     </button>
+                                  )}
+                                  {aiMappings[row.ae_term] && aiMappings[row.ae_term] !== row.suggestion?.term && (
+                                    <button
+                                      onClick={() => handleAdoptSuggestion(row.ae_term, aiMappings[row.ae_term]!)}
+                                      className="block text-left text-violet-600 hover:text-violet-800 underline decoration-dotted"
+                                      title="AI 判定為主檔詞彙的同義詞，點擊以主檔詞彙重新分析"
+                                    >
+                                      <Sparkles size={11} className="inline mr-0.5" />
+                                      AI：是否即為「{aiMappings[row.ae_term]}」？點此採用
+                                    </button>
+                                  )}
+                                  {row.ae_term in aiMappings && aiMappings[row.ae_term] === null && (
+                                    <span className="block text-[10px] text-slate-400" title="AI 未在主檔中找到語意相同的詞彙">
+                                      AI：非主檔同義詞（真未預期）
+                                    </span>
                                   )}
                                 </div>
                               ) : (
