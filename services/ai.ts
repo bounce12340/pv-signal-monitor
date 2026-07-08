@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { settings } from "./settings";
+import { extractPdfText } from "./pdfText";
 import type { ExtractedMaster } from "../types";
 
 const SYSTEM_INSTRUCTION = `
@@ -139,10 +140,14 @@ async function extractWithOpenAiCompatible(
   textInput: string,
   fileInput?: FileInput
 ): Promise<ExtractedMaster> {
+  // OpenAI-compatible endpoints cannot take a PDF directly; feed them the
+  // text layer instead (throws with guidance when the PDF is a pure scan).
   if (fileInput && fileInput.mimeType === "application/pdf") {
-    throw new Error(
-      "OpenAI 相容端點不支援直接上傳 PDF。請改用 Gemini、上傳仿單圖片，或直接貼上仿單文字。"
-    );
+    const pdfText = await extractPdfText(fileInput.data);
+    textInput = [textInput, `【仿單 PDF 文字內容】\n${pdfText}`]
+      .filter(Boolean)
+      .join("\n\n");
+    fileInput = undefined;
   }
 
   type ContentPart =
