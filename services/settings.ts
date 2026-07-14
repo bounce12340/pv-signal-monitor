@@ -1,4 +1,7 @@
-// App-level settings persisted in localStorage (never bundled into the build).
+// App-level settings persisted in the unified storage backend (IndexedDB, with
+// a localStorage fallback). Never bundled into the build.
+
+import { loadSync, save } from './storage';
 
 export type AiProvider = 'gemini' | 'openai-compatible';
 
@@ -37,20 +40,19 @@ export const DEFAULT_RULE_CONFIG: SignalRuleConfig = {
 const AI_KEY = 'pv_settings_ai';
 const RULES_KEY = 'pv_settings_rules';
 
+// Settings keys that carried localStorage data before the IndexedDB backend;
+// hydrated and migrated at boot alongside the db tables.
+export const SETTINGS_KEY_LIST: string[] = [AI_KEY, RULES_KEY];
+
 function load<T>(key: string, fallback: T): T {
-  try {
-    const str = localStorage.getItem(key);
-    if (!str) return { ...fallback };
-    return { ...fallback, ...JSON.parse(str) };
-  } catch {
-    return { ...fallback };
-  }
+  const stored = loadSync<Partial<T>>(key);
+  return stored ? { ...fallback, ...stored } : { ...fallback };
 }
 
 export const settings = {
   getAi: (): AiSettings => load(AI_KEY, DEFAULT_AI_SETTINGS),
-  saveAi: (s: AiSettings) => localStorage.setItem(AI_KEY, JSON.stringify(s)),
+  saveAi: (s: AiSettings) => save(AI_KEY, s),
 
   getRules: (): SignalRuleConfig => load(RULES_KEY, DEFAULT_RULE_CONFIG),
-  saveRules: (r: SignalRuleConfig) => localStorage.setItem(RULES_KEY, JSON.stringify(r)),
+  saveRules: (r: SignalRuleConfig) => save(RULES_KEY, r),
 };

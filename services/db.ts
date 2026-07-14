@@ -1,6 +1,8 @@
 import type { ExtractedMaster } from '../types';
 import type { AeMasterItem } from './analysis';
 import type { MasterVersion } from './versions';
+import { loadSync, save } from './storage';
+import { DB_KEY as LIT_MASTER_KEY, PENDING_KEY as LIT_PENDING_KEY } from './literature/storage';
 
 // Simple ID generator
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -79,24 +81,24 @@ const DB_KEYS = {
   VERSIONS: 'pv_db_master_versions'
 };
 
-// --- Memory Cache ---
-const cache: Record<string, unknown> = {};
+// The host tables that carried localStorage data before the IndexedDB backend.
+// Both hydrated and migrated at boot (see initStorage in index.tsx).
+export const DB_KEY_LIST: string[] = Object.values(DB_KEYS);
+
+// --- Backend (unified storage) ---
+// Reads come from the shared in-memory cache (hydrated from IndexedDB at boot);
+// writes update the cache and persist to IndexedDB in the background.
+// monitorBatches is a derived view, memoised here rather than persisted.
+let monitorBatchesMemo: MonitorBatch[] | null = null;
 
 function getFromCacheOrStorage<T>(key: string): T[] {
-  if (cache[key]) {
-    return cache[key] as T[];
-  }
-  const str = localStorage.getItem(key);
-  const data = str ? JSON.parse(str) : [];
-  cache[key] = data;
-  return data;
+  return loadSync<T[]>(key) ?? [];
 }
 
 function saveToStorageAndCache<T>(key: string, data: T[]) {
-  cache[key] = data;
-  localStorage.setItem(key, JSON.stringify(data));
+  save(key, data);
   if (key === DB_KEYS.MONITOR) {
-    delete cache['monitor_batches'];
+    monitorBatchesMemo = null;
   }
 }
 
@@ -266,8 +268,8 @@ export const db = {
 
   // Get distinct batches (reports) for display in library
   getMonitorBatches: (): MonitorBatch[] => {
-    if (cache['monitor_batches']) {
-      return cache['monitor_batches'] as MonitorBatch[];
+    if (monitorBatchesMemo) {
+      return monitorBatchesMemo;
     }
 
     const all = db.getQuarterlyAeMonitors();
@@ -304,7 +306,7 @@ export const db = {
       new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime()
     );
     
-    cache['monitor_batches'] = result;
+    monitorBatchesMemo = result;
     return result;
   },
 
@@ -349,13 +351,18 @@ export const db = {
 
   exportAll: () => ({
     schema: 'pv-signal-monitor-backup',
-    version: 1,
+    // v2 adds the literature library (master_db / pending_review). The Worker
+    // validates the schema string only, so the D1 schema/API stay unchanged.
+    version: 2,
     exported_at: new Date().toISOString(),
     products: db.getProducts(),
     label_ae_master: db.getLabelAeMasters(),
     quarterly_ae_monitor: db.getQuarterlyAeMonitors(),
     system_logs: db.getLogs(),
     master_versions: db.getMasterVersions(),
+    // Literature library, read synchronously from the shared cache.
+    master_db: loadSync<unknown[]>(LIT_MASTER_KEY) ?? [],
+    pending_review: loadSync<unknown[]>(LIT_PENDING_KEY) ?? [],
   }),
 
   // Replaces ALL local data with the backup content. Caller must confirm first.
@@ -375,6 +382,10 @@ export const db = {
     saveToStorageAndCache(DB_KEYS.MONITOR, monitors);
     saveToStorageAndCache(DB_KEYS.LOGS, logs);
     saveToStorageAndCache(DB_KEYS.VERSIONS, versions);
+
+    // Literature library (absent from v1 snapshots — defaults to empty).
+    save(LIT_MASTER_KEY, Array.isArray(d.master_db) ? d.master_db : []);
+    save(LIT_PENDING_KEY, Array.isArray(d.pending_review) ? d.pending_review : []);
 
     db.addLog('IMPORT', 'SYSTEM',
       `Restored backup (products: ${products.length}, master rows: ${masters.length}, monitor rows: ${monitors.length})`);
