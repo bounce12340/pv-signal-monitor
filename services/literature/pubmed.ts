@@ -17,6 +17,27 @@ function ncbiPause(): Promise<void> {
   return new Promise((r) => setTimeout(r, NCBI_API_KEY ? 110 : 350));
 }
 
+export interface PubMedQueryInput {
+  ingredients: string[];
+  aeTerms: string[];
+  exclusions: string[];
+}
+
+/**
+ * Assemble a PubMed boolean query string from the search form's parsed
+ * fields: ingredients OR'd together, AE terms AND'd in (OR'd among
+ * themselves), exclusions NOT'd out. A term containing `*` (truncation) or
+ * `"` (an explicit phrase) is passed through unquoted; everything else is
+ * wrapped in quotes as an exact phrase.
+ */
+export function buildPubMedQuery({ ingredients, aeTerms, exclusions }: PubMedQueryInput): string {
+  const quote = (t: string) => (/[*"]/.test(t) ? t : `"${t}"`);
+  const ingredientsClause = ingredients.map((i) => `("${i}")`).join(' OR ');
+  const aeClause = aeTerms.length > 0 ? ` AND (${aeTerms.map(quote).join(' OR ')})` : '';
+  const exclusionClause = exclusions.map((t) => ` NOT (${quote(t)})`).join('');
+  return `(${ingredientsClause})${aeClause}${exclusionClause}`;
+}
+
 /**
  * Precise, reproducible PubMed search via NCBI E-utilities.
  * maxResults: max records returned (paged; default 100).

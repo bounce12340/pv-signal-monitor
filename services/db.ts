@@ -52,7 +52,7 @@ export interface SystemLog {
   id: string;
   timestamp: string;
   action_type: 'CREATE' | 'UPDATE' | 'DELETE' | 'EXPORT' | 'IMPORT' | 'LOGIN' | 'ANALYSIS';
-  module: 'PRODUCT' | 'MONITOR' | 'SYSTEM';
+  module: 'PRODUCT' | 'MONITOR' | 'SYSTEM' | 'LITERATURE';
   description: string;
   user?: string; // Placeholder for future auth
   // Tamper-evident hash chain: hash = SHA-256 of the entry incl. prev_hash.
