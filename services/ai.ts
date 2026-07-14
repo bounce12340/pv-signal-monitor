@@ -1,6 +1,14 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { settings } from "./settings";
 import { extractPdfText } from "./pdfText";
+import {
+  resolveLlm,
+  geminiGenerate,
+  openaiChat,
+  parseJsonLoose,
+  type ResolvedLlm,
+  type ChatContent,
+} from "./llm";
 import type { ExtractedMaster } from "../types";
 
 const SYSTEM_INSTRUCTION = `
@@ -101,14 +109,11 @@ function normalizeResult(data: Partial<ExtractedMaster>): ExtractedMaster {
 }
 
 async function extractWithGemini(
-  apiKey: string,
-  model: string,
+  cfg: ResolvedLlm,
   textInput: string,
   fileInput?: FileInput
 ): Promise<ExtractedMaster> {
-  const ai = new GoogleGenAI({ apiKey });
   const parts: Array<Record<string, unknown>> = [];
-
   if (fileInput) {
     parts.push({ inlineData: { mimeType: fileInput.mimeType, data: fileInput.data } });
   }
@@ -116,27 +121,20 @@ async function extractWithGemini(
     parts.push({ text: textInput });
   }
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: { role: "user", parts },
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: "application/json",
-      responseSchema: AE_MASTER_SCHEMA,
-      temperature: 0.1,
-      maxOutputTokens: 16384,
-    },
+  const rawText = await geminiGenerate(cfg, {
+    systemInstruction: SYSTEM_INSTRUCTION,
+    parts,
+    schema: AE_MASTER_SCHEMA,
+    temperature: 0.1,
+    maxTokens: 16384,
   });
-
-  const rawText = (response.text || "").trim();
   if (!rawText) throw new Error("模型未回傳內容，請重試或改用較小的檔案。");
-  return normalizeResult(JSON.parse(rawText));
+  // responseSchema guarantees JSON; parseJsonLoose still tolerates stray fences.
+  return normalizeResult(parseModelJson(rawText));
 }
 
 async function extractWithOpenAiCompatible(
-  apiKey: string,
-  model: string,
-  baseUrl: string,
+  cfg: ResolvedLlm,
   textInput: string,
   fileInput?: FileInput
 ): Promise<ExtractedMaster> {
@@ -150,11 +148,7 @@ async function extractWithOpenAiCompatible(
     fileInput = undefined;
   }
 
-  type ContentPart =
-    | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string } };
-
-  const content: ContentPart[] = [];
+  const content: Exclude<ChatContent, string> = [];
   if (fileInput) {
     content.push({
       type: "image_url",
@@ -166,36 +160,24 @@ async function extractWithOpenAiCompatible(
     text: textInput || "請依系統指示，從附件仿單中提取 AE 主檔 JSON。",
   });
 
-  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION },
-        { role: "user", content },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`API 回應 ${res.status}：${body.slice(0, 300)}`);
-  }
-
-  const json = await res.json();
-  const text: string = json?.choices?.[0]?.message?.content || "";
+  const text = await openaiChat(
+    cfg,
+    [
+      { role: "system", content: SYSTEM_INSTRUCTION },
+      { role: "user", content },
+    ],
+    { jsonMode: true, temperature: 0.1 }
+  );
   if (!text) throw new Error("模型未回傳內容。");
+  return normalizeResult(parseModelJson(text));
+}
 
-  // Some models still wrap JSON in a code fence despite response_format.
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  return normalizeResult(JSON.parse(fenced ? fenced[1] : text));
+// Parse a model reply that should be JSON; surface a SyntaxError (mapped to a
+// friendly message by the caller) when it cannot be parsed at all.
+function parseModelJson(raw: string): any {
+  const parsed = parseJsonLoose(raw);
+  if (parsed == null) throw new SyntaxError("model output is not valid JSON");
+  return parsed;
 }
 
 // --- AI term normalization (synonym-level mapping to master terms) ---
@@ -234,61 +216,32 @@ export async function mapTermsToMaster(
   inputs: string[],
   masterTerms: string[]
 ): Promise<Record<string, string | null>> {
-  const ai = settings.getAi();
-  if (!ai.apiKey && ai.provider === "gemini") {
-    throw new Error("尚未設定 API Key。請點右上角「設定」填入您的金鑰。");
-  }
-  if (ai.provider === "openai-compatible" && !ai.baseUrl) {
-    throw new Error("尚未設定 API 端點 (Base URL)。請點右上角「設定」。");
-  }
-  if (!ai.model) throw new Error("尚未設定模型名稱。請點右上角「設定」。");
+  const cfg = resolveLlm(settings.getAi());
 
   const userText =
     `主檔詞彙清單：\n${masterTerms.join("、")}\n\n待對應詞彙：\n${inputs.join("、")}`;
 
   let rawText: string;
-  if (ai.provider === "gemini") {
-    const genai = new GoogleGenAI({ apiKey: ai.apiKey });
-    const response = await genai.models.generateContent({
-      model: ai.model,
-      contents: { role: "user", parts: [{ text: userText }] },
-      config: {
-        systemInstruction: MAPPING_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: MAPPING_SCHEMA,
-        temperature: 0,
-      },
+  if (cfg.mode === "gemini") {
+    rawText = await geminiGenerate(cfg, {
+      systemInstruction: MAPPING_INSTRUCTION,
+      parts: [{ text: userText }],
+      schema: MAPPING_SCHEMA,
+      temperature: 0,
     });
-    rawText = (response.text || "").trim();
   } else {
-    const url = `${ai.baseUrl.replace(/\/+$/, "")}/chat/completions`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(ai.apiKey ? { Authorization: `Bearer ${ai.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: ai.model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: MAPPING_INSTRUCTION },
-          { role: "user", content: userText },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`API 回應 ${res.status}：${body.slice(0, 300)}`);
-    }
-    const json = await res.json();
-    rawText = json?.choices?.[0]?.message?.content || "";
+    rawText = await openaiChat(
+      cfg,
+      [
+        { role: "system", content: MAPPING_INSTRUCTION },
+        { role: "user", content: userText },
+      ],
+      { jsonMode: true, temperature: 0 }
+    );
   }
   if (!rawText) throw new Error("模型未回傳內容。");
 
-  const fenced = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  const parsed = JSON.parse(fenced ? fenced[1] : rawText) as {
+  const parsed = (parseModelJson(rawText) ?? {}) as {
     mappings?: Array<{ input?: unknown; master?: unknown }>;
   };
 
@@ -314,28 +267,13 @@ export async function extractAEMaster(
     throw new Error("No input provided");
   }
 
-  const ai = settings.getAi();
-  if (!ai.apiKey && ai.provider === "gemini") {
-    throw new Error("尚未設定 API Key。請點右上角「設定」填入您的金鑰。");
-  }
-  if (ai.provider === "openai-compatible" && !ai.baseUrl) {
-    throw new Error("尚未設定 API 端點 (Base URL)。請點右上角「設定」。");
-  }
-  if (!ai.model) {
-    throw new Error("尚未設定模型名稱。請點右上角「設定」。");
-  }
+  const cfg = resolveLlm(settings.getAi());
 
   try {
-    if (ai.provider === "gemini") {
-      return await extractWithGemini(ai.apiKey, ai.model, textInput, fileInput);
+    if (cfg.mode === "gemini") {
+      return await extractWithGemini(cfg, textInput, fileInput);
     }
-    return await extractWithOpenAiCompatible(
-      ai.apiKey,
-      ai.model,
-      ai.baseUrl,
-      textInput,
-      fileInput
-    );
+    return await extractWithOpenAiCompatible(cfg, textInput, fileInput);
   } catch (error) {
     console.error("AI extraction error:", error);
     if (error instanceof SyntaxError) {
