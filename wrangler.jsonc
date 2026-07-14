@@ -17,13 +17,36 @@
       "database_id": "ba40bffa-f460-4aa5-8ba9-24141688c1eb"
     }
   ],
+  // Fixed-window rate limiter for /llm/* and /ollama-cloud/* (worker/index.ts
+  // isRateLimited); same KV namespace PV-Link's proxy used, same account.
+  // Unbound is also safe (limiter fails open) but the namespace already
+  // exists, so we bind it.
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT",
+      "id": "f335d67ab7e7432ca69dc181224bb535"
+    }
+  ],
+  "vars": {
+    // Upstream for the platform-default /llm/* proxy. Ollama Cloud today;
+    // repointing this alone (no code change) moves both this app and any
+    // other client of the same OpenAI-compatible shape.
+    "LLM_BASE_URL": "https://ollama.com/v1",
+    // Not read by the Worker (see worker/index.ts Env.LLM_MODEL) — kept for
+    // parity with PV-Link's config and as a record of what's deployed
+    // upstream today.
+    "LLM_MODEL": "deepseek-v4-pro",
+    // Per-IP requests/minute before /llm and /ollama-cloud return 429.
+    "RATE_LIMIT_MAX": "30"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    // Only the Ollama proxy and the sync API invoke the Worker; all static
-    // assets are served directly (cheaper, navigations skip the Worker).
-    "run_worker_first": ["/ollama-cloud/*", "/api/*"]
+    // Only the LLM proxy routes and the sync API invoke the Worker; all
+    // other static assets are served directly (cheaper, navigations skip the
+    // Worker).
+    "run_worker_first": ["/llm/*", "/ollama-cloud/*", "/api/*"]
   },
   "observability": {
     "enabled": true

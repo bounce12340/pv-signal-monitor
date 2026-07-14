@@ -253,3 +253,56 @@ PV-Link 原 `signals` tab（App.tsx:760-822，成分×PT 質化聚合）**未落
 - PV-Link 原 `signals` tab 的獨立頁面/成分過濾 UI 未整頁搬遷，改以 `MonitorMode` 內嵌卡片＋純文字關鍵字篩選取代（無法依「產品」自動篩選，因 `Product` 型別無 `ingredient` 欄位可供對應）。
 - 平台預設 `/llm/*` 代理 Worker 仍未建立（沿用前一階段的已知缺口），三個新分頁的 AI 呼叫在該 Worker 上線前會走平台預設模式並收到端點錯誤；已在瀏覽器測試中確認錯誤會被各處的 try/catch 吞下並顯示保守預設值，不會讓 UI 崩潰。
 - 未新增元件層測試（三個新分頁皆為容器型 UI，邏輯已在 `services/literature/*` 的既有測試中覆蓋；`buildPubMedQuery` 已補測試）。
+
+## 階段：Worker 合併 — 新增 `/llm/*` 平台代理
+
+**目標**：兌現前端 `services/llm.ts` 的 `/llm/*` 同源代理假設，讓 `resolveLlm()` 的平台預設模式（無 BYO Key 時）真的能打到後端。合併後只有 `pv.uic-ai.com` 一個部署，不再新增第二支 Worker。
+
+### 變更檔案
+
+- `worker/index.ts`：
+  - 新增 `/llm/*` 路由，轉發到 `env.LLM_BASE_URL`（預設 `https://ollama.com/v1`）；請求無 `Authorization` 時沿用既有 secret `OLLAMA_API_KEY` 注入 Bearer token（沒有新增 secret）。
+  - 原本內嵌在 `fetch()` 裡的 `/ollama-cloud/*` 轉發邏輯抽成共用函式 `proxyLlm(request, env, url, route)`，`/llm/*` 與 `/ollama-cloud/*` 共用同一份程式碼（method 檢查、`Authorization`/`Content-Type` 轉發、串流回應），僅靠 `ProxyRoute`（`prefix`/`upstreamBase`/`requireUpstreamPrefix`）參數區分：
+    - `/llm/*`：`upstreamBase = env.LLM_BASE_URL || 'https://ollama.com/v1'`，不要求 `/v1/`、`/api/` 前綴（因為 base 已內含 `/v1`，前端 `services/llm.ts` 的 `PLATFORM_BASE='/llm'` 送出的是 `/llm/chat/completions`，去掉前綴後只剩 `/chat/completions`）。
+    - `/ollama-cloud/*`：`upstreamBase` 固定 `'https://ollama.com'`（不受 `LLM_BASE_URL` 影響），沿用原本 `ALLOWED_UPSTREAM_PREFIXES=['/v1/','/api/']` 白名單——**刻意保持與合併前一致**，因為 `components/SettingsModal.tsx:14` 的手動預設 `OLLAMA_CLOUD_URL='/ollama-cloud/v1'` 仍在用，若也改成 `LLM_BASE_URL` 驅動會造成 `/v1` 疊兩層（`https://ollama.com/v1/v1/...`）。本階段未動 `SettingsModal.tsx`。
+  - 新增 `isRateLimited()`，逐字搬自 PV-Link `worker/index.js` 的固定窗演算法（每 IP 每 60 秒一窗，`RATE_LIMIT_MAX` 預設 30，KV 未綁定或例外一律 fail-open），套用在 `/llm/*` 與 `/ollama-cloud/*` 兩條路由（`/ollama-cloud/*` 原本沒有速率限制，這是本階段的新增保護，非回歸風險——KV 未綁時行為不變）。
+  - `Env` 新增 `LLM_BASE_URL?`、`LLM_MODEL?`（Worker 不讀，僅存檔留痕，模型名走前端請求 body）、`RATE_LIMIT?: KVNamespace`、`RATE_LIMIT_MAX?`；新增最小 `KVNamespace` 型別（比照既有 D1 最小型別的作法，不引入 `@cloudflare/workers-types`）。
+  - `/api/*` 的 `handleSync`/`identity()` 完全未改動。
+- `wrangler.jsonc`：
+  - 新增 `kv_namespaces: [{ binding: "RATE_LIMIT", id: "f335d67ab7e7432ca69dc181224bb535" }]`——沿用 PV-Link 舊 Worker 的既有 KV namespace（同帳號），未新建。
+  - 新增 `vars`：`LLM_BASE_URL="https://ollama.com/v1"`、`LLM_MODEL="deepseek-v4-pro"`、`RATE_LIMIT_MAX="30"`。
+  - `run_worker_first` 加入 `/llm/*`（原本只有 `/ollama-cloud/*` 與 `/api/*`）。
+  - `routes`（custom domain）與 `d1_databases` 未動。
+
+### 本機驗證（`npx wrangler dev`，兩次啟動）
+
+第一次 `--var DEV_MODE:true`（bindings 確認：`RATE_LIMIT`/`DB`/`ASSETS`/`LLM_BASE_URL`/`LLM_MODEL`/`RATE_LIMIT_MAX`/`DEV_MODE` 皆正確列出）：
+- `GET /llm/models` → **200**，實際轉發到 `https://ollama.com/v1/models` 並拿回真實模型清單（含 `deepseek-v4-pro`），證明 `/llm/*` 轉發活著。
+- `POST /llm/chat/completions`（無 key）→ **401** `{"error":"Unauthorized"}`——本機未設 `OLLAMA_API_KEY` secret，上游拒絕，符合預期（轉發本身正常，只是沒帶到有效金鑰）。
+- `POST /ollama-cloud/v1/chat/completions`（相容別名）→ 同樣 **401**，行為與 `/llm/*` 一致。
+- `GET /ollama-cloud/bogus`（不含 `/v1/`、`/api/` 前綴）→ **404**，白名單仍生效。
+- `DELETE /llm/chat/completions` → **405**，method 檢查仍生效。
+- `GET /`（靜態資產）→ **200**。
+- 發現：因 `DEV_MODE=true` 時 `identity()` 會 fallback 成 `'dev@local'`，`PUT /api/sync` 無身分標頭時不是回 401，而是先過身分檢查、卡在 schema 驗證回 **400**（`{}` 不符 `pv-signal-monitor-backup`）——這是合併前就存在的既有行為，非本階段回歸。
+
+第二次不帶 `DEV_MODE`（重啟到另一個 port 驗證真實 Access 情境）：
+- `GET /api/sync/latest` 與 `PUT /api/sync`（皆無身分標頭）→ 兩者皆 **401** `{"error":"unauthenticated"}`，證實 `/api/*` 的 Access 身分閘門未受本次改動影響。
+- `GET /llm/models` → **200**（與 `DEV_MODE` 無關，符合設計）。
+- `GET /`→ **200**。
+- 驗證完畢後透過 PowerShell 依 PID 關閉兩個 `wrangler dev` 實例，確認埠號皆不再回應。
+
+### 已知插曲（工具問題，非本階段程式碼缺陷）
+
+- `rtk npx wrangler dev <subcommand> ...` 在本機環境會被誤轉成 `npm run wrangler ...`（`npm error Missing script: "wrangler"`），對 `wrangler --version` 這種只有旗標、沒有子指令的呼叫則正常。複現後改為直接呼叫 `npx wrangler dev`（略過 `rtk` 前綴）完成本階段的 dev server 驗證；`tsc`/`npm test`/`npm run build` 仍照規定經 `rtk` 執行且皆正常。
+
+### 驗證結果
+
+- `npx tsc --noEmit`：**0 錯誤**。
+- `npm test`：**12 test files / 77 tests passed**（與合併前一致，本階段未改動任何前端邏輯）。
+- `npm run build`：成功（1744 modules transformed）。
+
+### 未盡事項
+
+- `OLLAMA_API_KEY` secret 仍需之後手動 `wrangler secret put`（若尚未在正式環境設定）；本階段未觸碰 secret。
+- `components/SettingsModal.tsx` 的 `OLLAMA_CLOUD_URL='/ollama-cloud/v1'` 手動預設按鈕未整合進新的 `/llm` 平台預設流程（兩條路由共存，非互斥），是否要在 UI 上收斂成一個選項留待下一階段決定。
+- 未部署到正式環境（`wrangler deploy` 未執行），僅本機 `wrangler dev` 驗證。
