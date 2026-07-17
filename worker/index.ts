@@ -43,9 +43,8 @@ interface Env {
   // (its default). Includes any base path the upstream needs, since /llm's
   // stripped request path (e.g. "/chat/completions") is appended directly.
   LLM_BASE_URL?: string;
-  // Documented for parity with PV-Link's config; the Worker never reads this
-  // — it only forwards requests verbatim, and the model name travels in the
-  // client's own request body (services/llm.ts).
+  // Default model injected into JSON proxy bodies that carry no model of
+  // their own (services/llm.ts platform mode sends model: '').
   LLM_MODEL?: string;
   // Fixed-window rate limiter shared by both LLM proxy routes, ported from
   // PV-Link's worker. Unbound → limiter is skipped (fail-open).
@@ -183,10 +182,27 @@ async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute)
   const contentType = request.headers.get('Content-Type');
   if (contentType) headers.set('Content-Type', contentType);
 
+  // JSON bodies without a model get the platform default injected; anything
+  // else (non-JSON, unparseable, model already set) is forwarded verbatim.
+  let body: BodyInit | null | undefined = request.method === 'GET' ? undefined : request.body;
+  if (body && env.LLM_MODEL && (contentType || '').includes('application/json')) {
+    const text = await request.text();
+    body = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !parsed.model) {
+        parsed.model = env.LLM_MODEL;
+        body = JSON.stringify(parsed);
+      }
+    } catch {
+      // forward original text unchanged
+    }
+  }
+
   const upstream = await fetch(`${route.upstreamBase}${upstreamPath}${url.search}`, {
     method: request.method,
     headers,
-    body: request.method === 'GET' ? undefined : request.body,
+    body,
   });
   return new Response(upstream.body, upstream);
 }

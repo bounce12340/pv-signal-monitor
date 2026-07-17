@@ -76,7 +76,11 @@ export function resolveLlm(ai: AiSettings): ResolvedLlm {
     };
   }
   // Platform default: same-origin proxy, no key, Access cookie carries identity.
-  return { mode: 'openai', model: ai.model || '', baseUrl: PLATFORM_BASE, apiKey: '', platform: true };
+  // Only honor a stored model name typed for an OpenAI-compatible provider; a
+  // lingering Gemini model name must not leak to the proxy upstream. An empty
+  // model lets the Worker inject its LLM_MODEL default.
+  const model = ai.provider === 'openai-compatible' ? ai.model : '';
+  return { mode: 'openai', model, baseUrl: PLATFORM_BASE, apiKey: '', platform: true };
 }
 
 // --- OpenAI-compatible transport ---

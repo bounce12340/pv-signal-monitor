@@ -63,6 +63,18 @@ describe('resolveLlm (3 沿用來源)', () => {
     const r = resolveLlm(make({ provider: 'openai-compatible', apiKey: '', baseUrl: '' }));
     expect(r).toMatchObject({ mode: 'openai', baseUrl: '/llm', apiKey: '', platform: true });
   });
+
+  it('gemini 無金鑰退回平台時，殘留的 gemini 模型名不得外漏', () => {
+    const r = resolveLlm(make({ provider: 'gemini', apiKey: '', model: 'gemini-3.5-flash' }));
+    expect(r).toMatchObject({ platform: true, model: '' });
+  });
+
+  it('openai-compatible 無 baseUrl 但填了模型 → 平台代理沿用該模型', () => {
+    const r = resolveLlm(
+      make({ provider: 'openai-compatible', apiKey: '', baseUrl: '', model: 'qwen3.5:397b' })
+    );
+    expect(r).toMatchObject({ platform: true, baseUrl: '/llm', model: 'qwen3.5:397b' });
+  });
 });
 
 describe('mapLimit', () => {
