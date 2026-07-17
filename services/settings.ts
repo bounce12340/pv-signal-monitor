@@ -27,9 +27,14 @@ export interface SignalRuleConfig {
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   provider: 'gemini',
   apiKey: '',
-  model: 'gemini-3-flash-preview',
+  model: 'gemini-3.5-flash',
   baseUrl: '',
 };
+
+// Gemini model ids Google has retired server-side (requests 410). Stored
+// settings are healed to the current default at read time so users migrated
+// from older builds don't keep hitting a dead model.
+const RETIRED_GEMINI_MODELS = new Set(['gemini-3-flash-preview']);
 
 export const DEFAULT_RULE_CONFIG: SignalRuleConfig = {
   minCaseCount: 3,
@@ -50,7 +55,13 @@ function load<T>(key: string, fallback: T): T {
 }
 
 export const settings = {
-  getAi: (): AiSettings => load(AI_KEY, DEFAULT_AI_SETTINGS),
+  getAi: (): AiSettings => {
+    const s = load(AI_KEY, DEFAULT_AI_SETTINGS);
+    if (s.provider === 'gemini' && RETIRED_GEMINI_MODELS.has(s.model)) {
+      s.model = DEFAULT_AI_SETTINGS.model;
+    }
+    return s;
+  },
   saveAi: (s: AiSettings) => save(AI_KEY, s),
 
   getRules: (): SignalRuleConfig => load(RULES_KEY, DEFAULT_RULE_CONFIG),

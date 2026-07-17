@@ -21,7 +21,7 @@ import { settings, type AiSettings } from './settings';
 const PLATFORM_BASE = '/llm';
 
 // Default Gemini model when a BYO-Gemini user leaves the model field blank.
-const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 
 // --- Batching knobs (shared) ---
 // Evaluation/summary records per prompt: caps token size and keeps every pmid.

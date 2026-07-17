@@ -78,7 +78,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
               <input
                 value={ai.model}
                 onChange={(e) => setAi({ ...ai, model: e.target.value })}
-                placeholder={ai.provider === 'gemini' ? 'gemini-3-flash-preview' : 'anthropic/claude-sonnet-5'}
+                placeholder={ai.provider === 'gemini' ? 'gemini-3.5-flash' : 'anthropic/claude-sonnet-5'}
                 className={`${inputCls} font-mono`}
               />
             </div>
