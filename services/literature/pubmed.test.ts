@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPubMedQuery } from './pubmed';
+import { buildPubMedQuery, resolveMonth } from './pubmed';
 
 describe('buildPubMedQuery', () => {
   it('wraps a single ingredient in a parenthesised phrase group', () => {
@@ -36,5 +36,40 @@ describe('buildPubMedQuery', () => {
     expect(buildPubMedQuery({ ingredients: ['Drug'], aeTerms: [], exclusions: ['animal-only'] })).toBe(
       '(("Drug")) NOT ("animal-only")'
     );
+  });
+});
+
+describe('resolveMonth', () => {
+  it('數字月份補零並過濾越界值', () => {
+    expect(resolveMonth('7')).toBe('07');
+    expect(resolveMonth('12')).toBe('12');
+    expect(resolveMonth('0')).toBe('');
+    expect(resolveMonth('13')).toBe('');
+  });
+
+  it('英文月份（縮寫與全名）', () => {
+    expect(resolveMonth('Jul')).toBe('07');
+    expect(resolveMonth('July')).toBe('07');
+    expect(resolveMonth('DEC')).toBe('12');
+  });
+
+  it('季節映射到首月（北半球）', () => {
+    expect(resolveMonth('Spring')).toBe('04');
+    expect(resolveMonth('Summer')).toBe('07');
+    expect(resolveMonth('Fall')).toBe('10');
+    expect(resolveMonth('Autumn')).toBe('10');
+    expect(resolveMonth('Winter')).toBe('01');
+  });
+
+  it('月份/季節範圍取第一段', () => {
+    expect(resolveMonth('Jul-Aug')).toBe('07');
+    expect(resolveMonth('Jan-Feb')).toBe('01');
+    expect(resolveMonth('Nov-Dec')).toBe('11');
+  });
+
+  it('無法判定時回空字串', () => {
+    expect(resolveMonth('')).toBe('');
+    expect(resolveMonth(undefined)).toBe('');
+    expect(resolveMonth('n/a')).toBe('');
   });
 });

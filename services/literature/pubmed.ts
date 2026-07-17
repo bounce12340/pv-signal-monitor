@@ -49,9 +49,14 @@ export async function performPubMedSearch(
   maxResults = 100
 ): Promise<any[]> {
   // 1. esearch → PMIDs (up to maxResults).
+  // datetype=edat filters by the date the article was *added to PubMed* (Entrez
+  // date), always precise to the day — the right basis for "what newly appeared
+  // this monitoring window". pdat (publication date) is looser for articles with
+  // year-only or epub-ahead-of-print dates and was the source of confusing
+  // pre-window hits.
   const minDate = dateWindow.from.replace(/-/g, '/');
   const maxDate = dateWindow.to.replace(/-/g, '/');
-  const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&mindate=${minDate}&maxdate=${maxDate}&datetype=pdat&retmode=json&retmax=${maxResults}`;
+  const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&mindate=${minDate}&maxdate=${maxDate}&datetype=edat&retmode=json&retmax=${maxResults}`;
 
   const searchRes = await ncbiFetch(searchUrl);
   if (!searchRes.ok) throw new Error(`PubMed esearch 失敗 (HTTP ${searchRes.status})`);
@@ -119,33 +124,74 @@ export function parseArticles(xmlText: string): any[] {
   return results;
 }
 
-/** Parse the publication date from a PubmedArticle node, handling MedlineDate /
- *  Season / numeric or English month / missing day. */
+const MONTH_MAP: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+  // Seasons map to their first (northern-hemisphere) month.
+  spring: '04', summer: '07', fall: '10', autumn: '10', winter: '01',
+};
+
+/**
+ * Resolve a Month/Season token to a two-digit month, or '' when undeterminable.
+ * Handles numbers ("7"), English months ("Jul"/"July"), seasons ("Spring"),
+ * and ranges ("Jul-Aug", "Jan-Feb") by taking the first segment.
+ */
+export function resolveMonth(raw: string | undefined): string {
+  if (!raw) return '';
+  const token = raw.trim().toLowerCase();
+  if (/^\d{1,2}$/.test(token)) {
+    const n = parseInt(token, 10);
+    return n >= 1 && n <= 12 ? String(n).padStart(2, '0') : '';
+  }
+  const first = token.split(/[-–/]/)[0].trim();
+  return MONTH_MAP[first] ?? MONTH_MAP[first.slice(0, 3)] ?? '';
+}
+
+/** 'YYYY-MM-DD' from an element with numeric Year/Month/Day, else ''. */
+function ymd(el: Element | null): string {
+  if (!el) return '';
+  const year = el.querySelector('Year')?.textContent?.trim();
+  const month = resolveMonth(el.querySelector('Month')?.textContent?.trim());
+  const dayRaw = el.querySelector('Day')?.textContent?.trim() || '';
+  const day = /^\d{1,2}$/.test(dayRaw) ? dayRaw.padStart(2, '0') : '';
+  if (!year || !month || !day) return '';
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Best-available publication date from a PubmedArticle node, as 'YYYY-MM-DD'.
+ * Prefers the electronic <ArticleDate> (usually precise to the day and closest
+ * to when the article actually appeared); falls back to <PubDate>, parsing
+ * Season and month ranges, and only pads to -01-01 when nothing finer exists.
+ */
 export function extractPubDate(article: Element): string {
+  // Electronic ArticleDate first — resolves the common case where JournalIssue
+  // PubDate carries only a Year (which previously displayed as a false Jan 1).
+  const fromArticleDate = ymd(
+    article.querySelector('ArticleDate[DateType="Electronic"]') ||
+    article.querySelector('ArticleDate')
+  );
+  if (fromArticleDate) return fromArticleDate;
+
   const pubDate =
     article.querySelector('Article JournalIssue PubDate') || article.querySelector('PubDate');
   if (!pubDate) return '';
 
-  // MedlineDate e.g. "2025 Jan-Feb" or "2025 Spring": only the year is reliable.
+  // MedlineDate e.g. "2026 Jan-Feb" / "2026 Spring" / "2026".
   const medline = pubDate.querySelector('MedlineDate')?.textContent?.trim();
   if (medline) {
     const y = medline.match(/\d{4}/)?.[0];
-    return y ? `${y}-01-01` : '';
+    if (!y) return '';
+    return `${y}-${resolveMonth(medline.replace(y, '').trim()) || '01'}-01`;
   }
 
   const year = pubDate.querySelector('Year')?.textContent?.trim();
   if (!year) return '';
-  const monthRaw = pubDate.querySelector('Month')?.textContent?.trim() || '01';
-  const dayRaw = pubDate.querySelector('Day')?.textContent?.trim() || '01';
-
-  const monthMap: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-  };
-  const month =
-    monthMap[monthRaw.slice(0, 3).toLowerCase()] ||
-    (/^\d{1,2}$/.test(monthRaw) ? monthRaw.padStart(2, '0') : '01');
-  const day = /^\d{1,2}$/.test(dayRaw) ? dayRaw.padStart(2, '0') : '01';
-
-  return `${year}-${month}-${day}`;
+  const month = resolveMonth(
+    pubDate.querySelector('Month')?.textContent?.trim() ||
+    pubDate.querySelector('Season')?.textContent?.trim()
+  );
+  const dayRaw = pubDate.querySelector('Day')?.textContent?.trim() || '';
+  const day = month && /^\d{1,2}$/.test(dayRaw) ? dayRaw.padStart(2, '0') : '01';
+  return `${year}-${month || '01'}-${day}`;
 }
