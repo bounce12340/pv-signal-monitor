@@ -42,12 +42,32 @@ export const DEFAULT_RULE_CONFIG: SignalRuleConfig = {
   toleranceMarginPct: 0.05,
 };
 
+// Literature search criteria persisted across sessions, so each new search
+// round only needs a fresh ingredient — dates, keywords, exclusions and the
+// result limit stay put.
+export interface LitSearchConfig {
+  aeTerms: string;
+  exclusions: string;
+  dateFrom: string;
+  dateTo: string;
+  maxResults: number;
+}
+
+export const DEFAULT_LIT_SEARCH: LitSearchConfig = {
+  aeTerms: 'Adverse drug reactions, pharmacovigilance*',
+  exclusions: 'animal-only',
+  dateFrom: `${new Date().getFullYear()}-01-01`,
+  dateTo: `${new Date().getFullYear()}-12-31`,
+  maxResults: 100,
+};
+
 const AI_KEY = 'pv_settings_ai';
 const RULES_KEY = 'pv_settings_rules';
+const LIT_SEARCH_KEY = 'pv_settings_lit_search';
 
-// Settings keys that carried localStorage data before the IndexedDB backend;
-// hydrated and migrated at boot alongside the db tables.
-export const SETTINGS_KEY_LIST: string[] = [AI_KEY, RULES_KEY];
+// Settings keys hydrated at boot alongside the db tables (AI_KEY / RULES_KEY
+// also carried localStorage data before the IndexedDB backend).
+export const SETTINGS_KEY_LIST: string[] = [AI_KEY, RULES_KEY, LIT_SEARCH_KEY];
 
 function load<T>(key: string, fallback: T): T {
   const stored = loadSync<Partial<T>>(key);
@@ -66,4 +86,7 @@ export const settings = {
 
   getRules: (): SignalRuleConfig => load(RULES_KEY, DEFAULT_RULE_CONFIG),
   saveRules: (r: SignalRuleConfig) => save(RULES_KEY, r),
+
+  getLitSearch: (): LitSearchConfig => load(LIT_SEARCH_KEY, DEFAULT_LIT_SEARCH),
+  saveLitSearch: (c: LitSearchConfig) => save(LIT_SEARCH_KEY, c),
 };

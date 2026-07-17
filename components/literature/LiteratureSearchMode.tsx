@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppMode } from '../../types';
 import type { PVRecord } from '../../services/literature/types';
 import { buildPubMedQuery, performPubMedSearch } from '../../services/literature/pubmed';
 import { PVLLMService } from '../../services/literature/llmService';
 import { DB_KEY, PENDING_KEY, loadRecordsSync, saveRecords } from '../../services/literature/storage';
 import { db } from '../../services/db';
+import { settings } from '../../services/settings';
 import { Search, Loader2, AlertCircle, Sparkles } from 'lucide-react';
 
 const llm = new PVLLMService();
@@ -18,12 +19,25 @@ interface LiteratureSearchModeProps {
 const parseList = (s: string): string[] => s.split(',').map((t) => t.trim()).filter(Boolean);
 
 export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrigger }: LiteratureSearchModeProps) => {
+  // Search criteria persist across rounds and sessions (services/settings.ts);
+  // only the target ingredient is typed fresh each round.
+  const persisted = settings.getLitSearch();
   const [ingredientsText, setIngredientsText] = useState('');
-  const [aeTermsText, setAeTermsText] = useState('Adverse drug reactions, pharmacovigilance*');
-  const [exclusionsText, setExclusionsText] = useState('animal-only');
-  const [dateFrom, setDateFrom] = useState(`${new Date().getFullYear()}-01-01`);
-  const [dateTo, setDateTo] = useState(`${new Date().getFullYear()}-12-31`);
-  const [maxResults, setMaxResults] = useState(100);
+  const [aeTermsText, setAeTermsText] = useState(persisted.aeTerms);
+  const [exclusionsText, setExclusionsText] = useState(persisted.exclusions);
+  const [dateFrom, setDateFrom] = useState(persisted.dateFrom);
+  const [dateTo, setDateTo] = useState(persisted.dateTo);
+  const [maxResults, setMaxResults] = useState(persisted.maxResults);
+
+  useEffect(() => {
+    settings.saveLitSearch({
+      aeTerms: aeTermsText,
+      exclusions: exclusionsText,
+      dateFrom,
+      dateTo,
+      maxResults,
+    });
+  }, [aeTermsText, exclusionsText, dateFrom, dateTo, maxResults]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
@@ -125,7 +139,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
           </div>
           <div>
             <h2 className="font-bold text-lg text-slate-900">文獻檢索設定</h2>
-            <p className="text-slate-500 text-sm">透過 PubMed E-utilities 檢索目標成分之不良事件文獻，AI 評分並摘要後送入待核閱清單</p>
+            <p className="text-slate-500 text-sm">透過 PubMed E-utilities 檢索目標成分之不良事件文獻，AI 評分並摘要後送入待核閱清單。筆數、起訖日、關鍵字與排除詞會自動保存，每輪只需輸入新的目標成分。</p>
           </div>
         </div>
 

@@ -48,3 +48,32 @@ describe('settings.getAi retired-model healing', () => {
     expect(settings.getAi().model).toBe('gemini-3.5-flash');
   });
 });
+
+describe('settings.getLitSearch persistence', () => {
+  beforeEach(() => kv.clear());
+
+  it('無儲存值時回傳預設查詢條件', () => {
+    const c = settings.getLitSearch();
+    expect(c.maxResults).toBe(100);
+    expect(c.aeTerms).toContain('pharmacovigilance');
+  });
+
+  it('存回的條件下次讀取時保留', () => {
+    settings.saveLitSearch({
+      aeTerms: 'hepatotoxicity',
+      exclusions: 'review',
+      dateFrom: '2025-06-01',
+      dateTo: '2025-12-31',
+      maxResults: 250,
+    });
+    const c = settings.getLitSearch();
+    expect(c).toMatchObject({ aeTerms: 'hepatotoxicity', maxResults: 250, dateFrom: '2025-06-01' });
+  });
+
+  it('部分欄位缺漏時以預設補齊', () => {
+    kv.set('pv_settings_lit_search', { maxResults: 50 });
+    const c = settings.getLitSearch();
+    expect(c.maxResults).toBe(50);
+    expect(c.exclusions).toBe('animal-only');
+  });
+});
