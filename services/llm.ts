@@ -83,6 +83,38 @@ export function resolveLlm(ai: AiSettings): ResolvedLlm {
   return { mode: 'openai', model, baseUrl: PLATFORM_BASE, apiKey: '', platform: true };
 }
 
+/**
+ * Parse an OpenAI-compatible GET /models response into a sorted id list.
+ * Tolerates missing/odd shapes by returning an empty list.
+ */
+export function parseModelList(json: unknown): string[] {
+  const data = (json as { data?: unknown })?.data;
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((m) => (m as { id?: unknown })?.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    .sort();
+}
+
+/**
+ * Fetch the model list from an OpenAI-compatible endpoint. `baseUrl` ''
+ * targets the platform proxy. Returns [] on any failure — callers degrade
+ * to a free-text model field.
+ */
+export async function fetchModelList(baseUrl: string, apiKey: string): Promise<string[]> {
+  const base = (baseUrl || PLATFORM_BASE).replace(/\/+$/, '');
+  try {
+    const res = await fetch(`${base}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+      ...(baseUrl ? {} : { credentials: 'same-origin' as RequestCredentials }),
+    });
+    if (!res.ok) return [];
+    return parseModelList(await res.json());
+  } catch {
+    return [];
+  }
+}
+
 // --- OpenAI-compatible transport ---
 
 export type ChatContent =

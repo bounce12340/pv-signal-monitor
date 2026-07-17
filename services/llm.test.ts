@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseJsonLoose, reconcile, resolveLlm, mapLimit } from './llm';
+import { parseJsonLoose, reconcile, resolveLlm, mapLimit, parseModelList } from './llm';
 import { DEFAULT_AI_SETTINGS, type AiSettings } from './settings';
 
 describe('parseJsonLoose', () => {
@@ -74,6 +74,22 @@ describe('resolveLlm (3 沿用來源)', () => {
       make({ provider: 'openai-compatible', apiKey: '', baseUrl: '', model: 'qwen3.5:397b' })
     );
     expect(r).toMatchObject({ platform: true, baseUrl: '/llm', model: 'qwen3.5:397b' });
+  });
+});
+
+describe('parseModelList', () => {
+  it('抽出 id 並排序', () => {
+    const json = { data: [{ id: 'zeta' }, { id: 'alpha' }, { id: 'mid' }] };
+    expect(parseModelList(json)).toEqual(['alpha', 'mid', 'zeta']);
+  });
+  it('容忍缺 id 或非字串的項目', () => {
+    const json = { data: [{ id: 'ok' }, { id: 42 }, {}, null] };
+    expect(parseModelList(json)).toEqual(['ok']);
+  });
+  it('非預期形狀回空陣列', () => {
+    expect(parseModelList(null)).toEqual([]);
+    expect(parseModelList({})).toEqual([]);
+    expect(parseModelList({ data: 'nope' })).toEqual([]);
   });
 });
 
