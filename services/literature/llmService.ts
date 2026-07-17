@@ -16,6 +16,14 @@ import {
 // Concurrency for the whole-database structured extraction pass.
 const EXTRACT_CONCURRENCY = 3;
 
+// User preference: keep active-ingredient / drug names in their original
+// English (generic/INN) form inside translated output — never transliterate
+// them into Chinese, so they stay searchable and unambiguous for PV work.
+const keepDrugNamesDirective = (lang: Lang) =>
+  lang === 'en'
+    ? 'Keep every drug and active-ingredient name in its original English (generic/INN) form.'
+    : '文獻中的藥品主成分與藥物名稱一律保留原文英文學名（generic/INN），不要翻成中文（例如維持 "Fenofibrate"，不可寫成「非諾貝特」）。';
+
 export class PVLLMService {
   async scoreRelevance(records: any[], lang: Lang = 'zh', onProgress?: ProgressFn) {
     const slim = records.map((r) => ({ pmid: r.pmid, title: r.title, abstract: r.abstract }));
@@ -27,6 +35,7 @@ export class PVLLMService {
             `You are a pharmacovigilance analyst. For each record, evaluate PV relevance (0-100) based on potential adverse events. ` +
               `Return ONLY a JSON object shaped {"items":[{"pmid":string,"score":number,"reason":string}]} with exactly one entry per input pmid. ` +
               `${lang === 'en' ? 'The reason field must be in English.' : 'reason 欄位必須是繁體中文。'} ` +
+              `${keepDrugNamesDirective(lang)} ` +
               `Records: ${JSON.stringify(batch)}`
           );
           const arr = res?.items ?? res;
@@ -62,6 +71,7 @@ export class PVLLMService {
               `- summary_zh: 摘要，重點放在病例描述或研究方法。\n` +
               `- conclusion_zh: 獨立提煉該文獻的「結論」或「臨床建議」（對藥物安全監測最重要）。\n` +
               `${langDirective(lang)}\n` +
+              `${keepDrugNamesDirective(lang)}\n` +
               `只輸出 JSON，不要多餘文字。文獻資料： ${JSON.stringify(batch)}`
           );
           const arr = res?.items ?? res;
