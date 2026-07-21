@@ -256,7 +256,7 @@ PV-Link 原 `signals` tab（App.tsx:760-822，成分×PT 質化聚合）**未落
 
 ## 階段：Worker 合併 — 新增 `/llm/*` 平台代理
 
-**目標**：兌現前端 `services/llm.ts` 的 `/llm/*` 同源代理假設，讓 `resolveLlm()` 的平台預設模式（無 BYO Key 時）真的能打到後端。合併後只有 `pv.uic-ai.com` 一個部署，不再新增第二支 Worker。
+**目標**：兌現前端 `services/llm.ts` 的 `/llm/*` 同源代理假設，讓 `resolveLlm()` 的平台預設模式（無 BYO Key 時）真的能打到後端。合併後只有單一自訂網域部署（見 `wrangler.jsonc` 的 `routes`），不再新增第二支 Worker。
 
 ### 變更檔案
 
@@ -269,7 +269,7 @@ PV-Link 原 `signals` tab（App.tsx:760-822，成分×PT 質化聚合）**未落
   - `Env` 新增 `LLM_BASE_URL?`、`LLM_MODEL?`（Worker 不讀，僅存檔留痕，模型名走前端請求 body）、`RATE_LIMIT?: KVNamespace`、`RATE_LIMIT_MAX?`；新增最小 `KVNamespace` 型別（比照既有 D1 最小型別的作法，不引入 `@cloudflare/workers-types`）。
   - `/api/*` 的 `handleSync`/`identity()` 完全未改動。
 - `wrangler.jsonc`：
-  - 新增 `kv_namespaces: [{ binding: "RATE_LIMIT", id: "f335d67ab7e7432ca69dc181224bb535" }]`——沿用 PV-Link 舊 Worker 的既有 KV namespace（同帳號），未新建。
+  - 新增 `kv_namespaces` 的 `RATE_LIMIT` binding（id 見 `wrangler.jsonc`）——沿用 PV-Link 舊 Worker 的既有 KV namespace（同帳號），未新建。
   - 新增 `vars`：`LLM_BASE_URL="https://ollama.com/v1"`、`LLM_MODEL="deepseek-v4-pro"`、`RATE_LIMIT_MAX="30"`。
   - `run_worker_first` 加入 `/llm/*`（原本只有 `/ollama-cloud/*` 與 `/api/*`）。
   - `routes`（custom domain）與 `d1_databases` 未動。

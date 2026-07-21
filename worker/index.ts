@@ -6,8 +6,9 @@
 //
 // Identity for /api/* comes from the Cf-Access-Authenticated-User-Email
 // header that Cloudflare Access injects after login. The only route to this
-// Worker is pv.uic-ai.com, which sits entirely behind Access (workers.dev is
-// off), so a request without that header is not a legitimate one. The /llm
+// Worker is the custom domain in wrangler.jsonc, which sits entirely behind
+// Access (workers.dev is off), so a request without that header is not a
+// legitimate one. The /llm
 // and /ollama-cloud routes rely on that same perimeter (no per-request
 // identity check, no CORS allowlist needed since callers are same-origin).
 
@@ -35,8 +36,9 @@ interface Env {
   DEV_MODE?: string;
   // Set via `wrangler secret put OLLAMA_API_KEY`. Injected only when the
   // client sends no Authorization header, so a browser-stored key still wins.
-  // Safe to inject because the only route (pv.uic-ai.com) sits behind
-  // Cloudflare Access; workers.dev is disabled in wrangler.jsonc. Reused (not
+  // Safe to inject because the only route (the custom domain in
+  // wrangler.jsonc) sits behind Cloudflare Access; workers.dev is
+  // disabled there for exactly this reason. Reused (not
   // renamed) so the existing secret keeps working for both proxy routes.
   OLLAMA_API_KEY?: string;
   // Upstream OpenAI-compatible root for /llm/*, e.g. "https://ollama.com/v1"

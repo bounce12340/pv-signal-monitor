@@ -4,79 +4,126 @@
 
 # 智慧药品安全监视与信号侦测平台 (PV AE Master Generator & Signal Monitor)
 
-这是一个现代化的 AI 驱动药品安全监视 (Pharmacovigilance, PV) 网络应用程序，旨在自动化从药品说明书中提取不良反应 (AE) 数据，并执行上市后安全信号侦测与发生率监测。
+这是一款现代化的 AI 驱动药物警戒 (Pharmacovigilance, PV) 网络应用程序。它涵盖完整的 PV 信号侦测工作流程：从药品说明书中提取不良反应 (AE) 数据、针对该说明书执行季度发生率信号侦测，以及——自近期并入 PV-Link 项目后——监测已发表文献 (PubMed) 以发现新的安全性信号，直至产出 CIOMS/E2B 草稿。
 
-## 🌟 核心功能
+## 🌟 功能
 
-1. **🤖 AI 驱动的不良反应提取 (主档生成模式)**
-   - 支持上传 PDF、图片或纯文本格式的药品说明书。
-   - 利用 Google Gemini AI 自动提取系统器官分类 (SOC)、不良反应 (AE) 名称、说明书频率及阈值百分比。
-   - 提供可编辑的数据表界面，让用户在存入数据库前进行人工复核与修改。
+顶部导航共有 8 个分页；**标示 NEW 的项目**为本次并入 PV-Link 的文献监测工作流程。
 
-2. **📊 信号侦测与发生率监测 (监测模式)**
-   - 根据“销售数量”与“每日使用量”自动计算季度暴露量 (Exposure / 分母)。
-   - 输入当季 AE 案例数，系统将自动计算发生率 (Incidence Rate)。
-   - 自动将实际发生率与说明书阈值进行比对，并标记出 **未预期 (Unexpected)**、**异常 (Alert)** 或 **提醒 (Warning)** 信号。
-   - 支持将分析报表导出为 CSV 文件。
+1. **📋 总览 (Dashboard)**
+   - 各产品季度监测进度一览无遗，并提供捷径直达本季尚未完成监测的产品。
+   - **NEW** — 显示「文献待核阅」提醒（数量徽章），点击可直接跳转至文献核阅。
 
-3. **🗄️ 主档与数据库管理 (数据库模式)**
+2. **🤖 AI 驱动的不良反应提取 (主档生成模式)**
+   - 支持上传 PDF、图片或纯文本格式的药品说明书——单一文件，或**多文件批次队列**（依序提取，个别文件可重试）。
+   - 多供应商 AI 支持，统一由单一 LLM 客户端 (`services/llm.ts`) 解析：**平台默认**（无需密钥）、**自带 Gemini**（结构化输出），或任何**自带 OpenAI 兼容端点**（OpenRouter、Ollama、LM Studio……）。
+   - 提供可编辑的数据表，供人工在存入数据库前复核并修正 AI 提取的数据（批次结果同样须经人工复核才能保存）。
+
+3. **🔎 文献检索 (NEW)**
+   - 精确、可重现的 **PubMed E-utilities** 检索（esearch + efetch），依目标活性成分、AE 关键字与排除词组成查询；日期筛选以 PubMed 的**收录日 (edat)**——文献被收录进 PubMed 的日期——为基准，而非出版日期，让监测窗口能可靠地捕捉到新出现的文献。
+   - 每笔命中文献都会生成 AI 相关性评分 (0–100) 与中文摘要及结论，批次并发通过统一 LLM 客户端执行。
+   - 检索条件（笔数上限、日期范围、AE 关键字、排除词）会跨会话持久化，每一轮只需重新填写目标成分。
+
+4. **✅ 文献核阅 (NEW)**
+   - 已由 AI 评分、AI 摘要的文献队列，等待人工决定，可依最低相关性分数筛选。
+   - 选取文献后，系统会针对每笔记录自动执行一次结构化 PV 数据提取（产品、成分、不良反应原文、MedDRA PT 候选词、严重性、因果关系、结果……）。
+   - 可选择**导入正式文献库**或**退回**——两种操作皆会写入稽核轨迹。也可针对每笔记录生成、查看、复制或下载 **CIOMS-I / E2B(R3) 草稿**（依提取数据做确定性字段映射；明确标示为仍需 PV 人员审阅的草稿骨架）。
+
+5. **📊 信号侦测与监测 (监测模式)**
+   - 根据销售数量与每日用量计算季度暴露量，输入季度不良反应案例数（每行可标记**严重**）。
+   - 以精确 (Garwood) **泊松 95% 置信区间**将真实世界发生率与说明书阈值比对，标记出**未预期 (Unexpected)**、**异常 (Alert)** 或**提醒 (Warning)** 信号。
+   - **可配置信号规则**（最低案例数、警示倍数、容许缓冲）——每份报告都会记录所用的规则；被噪声抑制的行会附加标注。模糊比对（加上一道 AI 同义词标准化）会为未匹配的 AE 输入建议最相近的主档术语。
+   - 可导出为 CSV，或输出适合打印的季度报告（可另存为 PDF），内含规则声明与签署栏。
+   - **NEW** — 季度报告下方新增第二个、独立的「文献信号监测」面板：依**（活性成分 × MedDRA 首选术语）**聚合文献库，可依关键字筛选。这是质化的文献计数聚合，与上方的泊松置信区间分析属不同方法论（两者并列显示以凸显此区别）——并非统计显著性检定。
+
+6. **📚 文献库 (NEW)**
+   - 浏览、依关键字/日期筛选文献库（核阅模式导入的记录），并可导出为 CSV。
+   - 对任何仍缺少结构化 PV 数据的记录执行**批次结构化提取**，并显示进度。
+   - 可从文献库移除某笔记录（写入稽核日志）；点击可跳转回核阅模式重新打开该笔记录。
+
+7. **🗄️ 主档与数据库管理 (数据库模式)**
    - 集中管理所有已保存的产品 AE 主档。
-   - 查看历史季度监测报告与信号侦测记录。
+   - 查看历史季度监测报告与信号侦测批次。
+   - **跨季度趋势分析**：各不良反应发生率的逐季折线图，并自动标记连续 ≥ 2 季上升的项目。
+   - **主档版本历史**：每次更新都会将先前的主档行归档，并提供新增/移除/阈值变更的差异检视器。
+   - **完整 JSON 备份导出/导入**——备份的架构 (schema) 也涵盖文献库与待核阅队列，单一文件即可还原全部数据。
 
-4. **🛡️ 稽核轨迹 (稽核日志模式)**
-   - 符合 GVP 规范的系统操作日志。
-   - 只读的稽核轨迹，完整记录所有 `新增`、`修改`、`删除`、`导出` 及 `分析` 动作。
+8. **🛡️ 稽核轨迹 (稽核日志模式)**
+   - 符合 GVP 规范的系统日志，采用 **SHA-256 哈希链**：每笔记录都串接前一笔，界面会验证链的完整性，任何篡改或删除都能被侦测。
+   - 只读的稽核轨迹，记录所有 `CREATE`、`UPDATE`、`DELETE`、`EXPORT`、`IMPORT` 与 `ANALYSIS` 动作，涵盖包括文献工作流程在内的所有模块。
+
+**⚙️ 系统设置**（右上角齿轮图标）：AI 供应商/模型/密钥配置与信号规则调整——详见下方**AI 供应商说明**。
 
 ## 🚀 快速开始 (本地端开发)
 
 ### 系统需求
-- Node.js (建议 v18 以上版本)
-- Google Gemini API Key
+- Node.js（建议 v18 以上版本）
+- 不需要 AI API 密钥即可试用本应用——平台默认代理无需密钥。只有想使用特定供应商/模型（Google Gemini、OpenRouter、本地 Ollama……）时，才需要自备密钥。
 
 ### 安装步骤
 
-1. 克隆项目到本地端：
+1. 克隆项目：
    ```bash
-   git clone https://github.com/your-username/pv-signal-monitor.git
+   git clone https://github.com/bounce12340/pv-signal-monitor.git
    cd pv-signal-monitor
    ```
 
-2. 安装依赖包：
+2. 安装依赖：
    ```bash
    npm install
    ```
 
-3. 配置 AI 供应商：
-   不再需要 `.env` 文件。启动开发服务器后，点击界面右上角的齿轮图标（设置），填入供应商／模型／API Key。密钥仅保存在您浏览器的 localStorage 中。
-
-4. 启动开发服务器：
+3. 启动开发服务器：
    ```bash
    npm run dev
    ```
 
-## 🛠️ 技术架构
-- **前端框架:** React 19, Vite, Tailwind CSS, Lucide React
-- **AI 整合:** Google GenAI SDK (`@google/genai`), Gemini 3 Flash Preview 模型
-- **数据存储:** 浏览器 LocalStorage 搭配内存缓存 (纯前端架构)
+4. （可选）**在应用内**配置自带 AI 供应商：点击右上角齿轮图标，填入供应商/模型/API 密钥。无需 `.env` 文件——密钥仅保存在您的浏览器中（绝不会被打包或上传）。
 
-## 🔌 多 AI 模型对接指南 (OpenAI, Claude, xAI, Ollama, OpenRouter)
+### 测试
 
-目前本项目默认使用 Google 的 `@google/genai` SDK 来调用 Gemini 模型。如果您希望在未来扩展支持多种 AI 来源，可以参考以下的架构指南进行修改：
+```bash
+npm test
+```
 
-### 1. 使用统一的 API 网关 (强烈推荐：OpenRouter)
-要支持多种模型又不想安装一堆不同的 SDK，最简单的方法是使用 **OpenRouter**。它提供与 OpenAI 完全兼容的 REST API，并能将请求路由给 Claude, xAI, Gemini, Llama 等各大模型。
-- 将项目中的 `@google/genai` 替换为标准的 `openai` Node.js SDK。
-- 将 API 的 `baseURL` 更改为 `https://openrouter.ai/api/v1`。
-- 根据用户的选择，动态传入对应的模型名称字符串 (例如：`anthropic/claude-3.5-sonnet`, `x-ai/grok-2`)。
+当前测试套件：**13 个测试文件，94 个测试**，全部通过（`vitest run`）。
 
-### 2. 通过 Ollama 运行本地模型 (Local Models)
-如果您的药品安全监视 (PV) 数据具备高度机密性，不希望上传至云端，您可以使用 **Ollama** 在本地端运行开源模型。
-- 确保 Ollama 已在本地端运行 (默认为 `http://localhost:11434`)。
-- 同样使用 `openai` SDK，并将 `baseURL` 指向 `http://localhost:11434/v1`。
-- *注意：由于本项目是纯前端 (Vite) 架构，您可能需要配置 Ollama 的环境变量来允许 CORS 跨域请求。*
+## 🛠️ 技术栈
+- **前端：** React 19, Vite, Tailwind CSS v4, Lucide React
+- **AI 整合：** 单一统一的 LLM 客户端 (`services/llm.ts`) 依请求解析三种来源之一——平台默认同源代理、Google GenAI SDK (`@google/genai`，结构化输出)，或通用 OpenAI 兼容 REST 调用（OpenRouter / Ollama / LM Studio）——并共享同一份 JSON 容错解析器与批次并发工具，供 AE 主档提取与文献处理流程共用
+- **文献检索：** PubMed E-utilities（esearch/efetch + XML 解析），独立于 LLM 层
+- **PV 词汇表：** MedDRA 首选术语 (PT) → 系统器官分类 (SOC) 种子词典（离线查询；并非获授权的完整 MedDRA 词典），用于信号聚合与 CIOMS/E2B 字段映射
+- **数据存储：** IndexedDB（单一数据库、单一键值对象存储），搭配内存缓存供同步读取；当 IndexedDB 不可用时退回 localStorage，并提供从旧版 localStorage 数据表迁移一次的机制
+- **后端：** 单一 Cloudflare Worker——静态资源、`/llm/*` 平台 LLM 代理、`/ollama-cloud/*` 兼容别名、`/api/*` 跨设备同步 (D1)、基于 KV 的限流
+- **测试：** Vitest
 
-### 3. 代码重构步骤
-若要实现此功能，您需要进行以下修改：
-1. **抽象化 AI 服务层：** 将 `services/gemini.ts` 重命名为 `services/ai.ts`。创建一个通用的接口，例如 `extractAEMaster(textInput, fileInput, provider, model, apiKey)`。
-2. **UI 设置界面：** 在前端画面新增一个“设置 (Settings)”弹出窗口，让用户可以选择他们偏好的 AI 供应商 (Gemini, OpenAI, Claude, Ollama)、输入指定的模型名称，以及填写他们自己的 API Key。
-3. **提示词工程 (Prompt Engineering) 微调：** 不同的模型对于输出 JSON 的理解能力不同。您可能需要根据选择的模型微调 `SYSTEM_INSTRUCTION`，或是针对 OpenAI 兼容的 API 加上强制 JSON 输出的参数 (例如 `response_format: { type: "json_object" }`)。
+## 🔌 AI 供应商说明
+
+三种来源，均在系统设置中选择：
+
+- **平台默认（无需密钥）：** 当未配置自带供应商时，请求会以同源方式发送至 `/llm/*`，由 Worker 代理到已配置的上游（OpenAI 兼容）——仅当浏览器本身未发送 `Authorization` 标头时，才会注入服务器端密钥。无需任何配置；依 IP 限流。
+- **自带 OpenAI 兼容端点：** 提供 base URL（可选附密钥）；模型清单会即时从该端点的 `GET /models` 取得，并以选择器呈现。支持文字与图片输入；PDF 通过在浏览器中提取文字层处理 (pdf.js)——**纯扫描版 PDF（仅有图片、无文字层）仍需具备视觉能力的模型**。系统设置对话框内建 OpenRouter、本地 Ollama 与平台 Ollama-Cloud 别名的快速预设。
+- **自带 Gemini：** 完整支持，包括原生 PDF 上传与结构约束的 JSON 结构化输出（无需容错步骤）。
+
+## ⚠️ 数据持久性
+
+主要存储是您浏览器的 **IndexedDB**（一个数据库、一个对象存储），并以内存缓存镜像供同步读取；若 IndexedDB 不可用，应用会退回 localStorage。首次升级后加载时，既有的 localStorage 数据会被一次性迁移进 IndexedDB（原始 localStorage 数值会保留作为回退快照）。
+
+请定期使用**数据库模式 → 匯出備份（导出备份）**，并在需要还原时导入该 JSON 文件——备份内容除 AE 主档数据外，还包括文献库与待核阅队列。部署在 Cloudflare 上时（见下文），导航栏的同步小工具还会额外将快照推送至 D1（每位用户保留最近 20 份），实现跨设备同步与时间点还原。
+
+## ☁️ 部署 (Cloudflare Workers)
+
+本应用以单一 Worker 搭配静态资源部署（`wrangler.jsonc`）：
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+组成部分：
+
+- **静态资源 + SPA 回退** 直接提供服务；只有 `/llm/*`（平台 LLM 代理）、`/ollama-cloud/*`（兼容别名）与 `/api/*`（同步）会触发 Worker。
+- **服务器端 LLM 密钥：** `npx wrangler secret put OLLAMA_API_KEY` 让平台默认与 Ollama-Cloud 别名路由无需任何客户端密钥即可对上游进行身份验证。这样做之所以安全，是因为该部署完全位于自定域名前的访问控制层之后——`wrangler.jsonc` 中刻意将 `workers_dev` 设为**禁用**，因为 `workers.dev` 网址会绕过该访问控制层，让 Worker 变成注入密钥的开放代理。
+- **限流：** 基于 KV 的固定窗口限流器，对 `/llm/*` 与 `/ollama-cloud/*` 路由依 IP 限制每分钟请求数（当 KV 命名空间不可用时会失效开放，不阻断请求）。
+- **跨设备同步：** 需要一个 D1 数据库（`npx wrangler d1 create pv-signal-monitor`，再建立 `snapshots` 表——见 `worker/index.ts`）以及域名前的访问控制层；用户身份来自该访问控制层注入的 `Cf-Access-Authenticated-User-Email` 标头。
+- **CI/CD：** `.github/workflows/ci.yml` 会在每次推送时执行类型检查/测试/构建，并在设置了 `CLOUDFLARE_API_TOKEN`（可选加上 `CLOUDFLARE_ACCOUNT_ID`）仓库密钥时自动部署 `main` 分支。
