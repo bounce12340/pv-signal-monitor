@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db, Product, MonitorBatch, SystemLog } from './services/db';
+import { PENDING_KEY, loadRecordsSync } from './services/literature/storage';
 import { AppMode, ExtractedMaster } from './types';
-import { FileText, Activity, Database, ShieldCheck, Settings, LayoutDashboard } from 'lucide-react';
+import { FileText, Activity, Database, ShieldCheck, Settings, LayoutDashboard, Search, ClipboardCheck, BookOpen } from 'lucide-react';
 import { DashboardMode } from './components/DashboardMode';
 import { GeneratorMode } from './components/GeneratorMode';
 import { MonitorMode } from './components/MonitorMode';
@@ -9,6 +10,9 @@ import { LibraryMode } from './components/LibraryMode';
 import { AuditMode } from './components/AuditMode';
 import { SettingsModal } from './components/SettingsModal';
 import { SyncWidget } from './components/SyncWidget';
+import { LiteratureSearchMode } from './components/literature/LiteratureSearchMode';
+import { LiteratureReviewMode } from './components/literature/LiteratureReviewMode';
+import { LiteratureLibraryMode } from './components/literature/LiteratureLibraryMode';
 
 export default function App() {
   // Navigation State
@@ -21,7 +25,9 @@ export default function App() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [monitorBatches, setMonitorBatches] = useState<MonitorBatch[]>([]);
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
-  
+  const [selectedLiteratureRecordId, setSelectedLiteratureRecordId] = useState<string | null>(null);
+  const [pendingLitCount, setPendingLitCount] = useState(0);
+
   // Trigger to force re-render of library view when DB changes
   const [dbUpdateTrigger, setDbUpdateTrigger] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -31,6 +37,7 @@ export default function App() {
     setSavedProducts(db.getProducts());
     setSystemLogs(db.getLogs());
     setMonitorBatches(db.getMonitorBatches());
+    setPendingLitCount(loadRecordsSync(PENDING_KEY).length);
   }, [activeMode, dbUpdateTrigger]);
 
   return (
@@ -80,13 +87,43 @@ export default function App() {
               1. AE 主檔生成
             </button>
             <button
+              onClick={() => setActiveMode('litSearch')}
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
+                activeMode === 'litSearch' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <Search size={16}/>
+              2. 文獻檢索
+            </button>
+            <button
+              onClick={() => setActiveMode('litReview')}
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
+                activeMode === 'litReview' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <ClipboardCheck size={16}/>
+              3. 文獻核閱
+              {pendingLitCount > 0 && (
+                <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{pendingLitCount}</span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveMode('monitor')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
                 activeMode === 'monitor' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Activity size={16}/>
-              2. 訊號監測
+              4. 訊號監測
+            </button>
+            <button
+              onClick={() => setActiveMode('litLibrary')}
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
+                activeMode === 'litLibrary' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <BookOpen size={16}/>
+              文獻庫
             </button>
             <button
               onClick={() => setActiveMode('library')}
@@ -130,6 +167,7 @@ export default function App() {
             monitorBatches={monitorBatches}
             setSelectedProductId={setSelectedProductId}
             setActiveMode={setActiveMode}
+            pendingLitCount={pendingLitCount}
           />
         )}
 
@@ -145,7 +183,7 @@ export default function App() {
         )}
 
         {activeMode === 'monitor' && (
-          <MonitorMode 
+          <MonitorMode
             masterResult={masterResult}
             setMasterResult={setMasterResult}
             savedProducts={savedProducts}
@@ -153,6 +191,30 @@ export default function App() {
             setSelectedProductId={setSelectedProductId}
             setDbUpdateTrigger={setDbUpdateTrigger}
             setActiveMode={setActiveMode}
+          />
+        )}
+
+        {activeMode === 'litSearch' && (
+          <LiteratureSearchMode
+            setActiveMode={setActiveMode}
+            setDbUpdateTrigger={setDbUpdateTrigger}
+          />
+        )}
+
+        {activeMode === 'litReview' && (
+          <LiteratureReviewMode
+            selectedRecordId={selectedLiteratureRecordId}
+            setSelectedRecordId={setSelectedLiteratureRecordId}
+            setActiveMode={setActiveMode}
+            setDbUpdateTrigger={setDbUpdateTrigger}
+          />
+        )}
+
+        {activeMode === 'litLibrary' && (
+          <LiteratureLibraryMode
+            setActiveMode={setActiveMode}
+            setSelectedRecordId={setSelectedLiteratureRecordId}
+            setDbUpdateTrigger={setDbUpdateTrigger}
           />
         )}
 

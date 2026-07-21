@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { performAnalysis, AnalysisReport } from '../services/analysis';
 import { mapTermsToMaster } from '../services/ai';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
@@ -6,7 +6,10 @@ import { settings } from '../services/settings';
 import { formatCI } from '../services/stats';
 import { AppMode, ExtractedMaster } from '../types';
 import { openPrintReport } from './printReport';
-import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer, Sparkles, Loader2 } from 'lucide-react';
+import { aggregateSignals } from '../services/literature/signals';
+import { DB_KEY as LIT_DB_KEY, loadRecordsSync } from '../services/literature/storage';
+import type { PVRecord } from '../services/literature/types';
+import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer, Sparkles, Loader2, FlaskConical, Search } from 'lucide-react';
 
 interface CountRow { term: string; count: string; serious: boolean; }
 
@@ -40,6 +43,19 @@ export const MonitorMode = React.memo(({
   const [analysisReport, setAnalysisReport] = useState<AnalysisReport | null>(null);
   const [showAllTerms, setShowAllTerms] = useState(false);
   const [monitorSaveStatus, setMonitorSaveStatus] = useState<'idle' | 'saved'>('idle');
+
+  // Literature signal aggregation (成分×PT 聚合，質化計數，獨立於下方 Poisson CI 分析).
+  // Tab remounts on switch, so a one-time sync load is always fresh (see literature components).
+  const [literatureRecords] = useState<PVRecord[]>(() => loadRecordsSync<PVRecord>(LIT_DB_KEY));
+  const [litFilter, setLitFilter] = useState('');
+  const litSignalReport = useMemo(() => aggregateSignals(literatureRecords), [literatureRecords]);
+  const litGroups = useMemo(() => {
+    const kw = litFilter.trim().toLowerCase();
+    if (!kw) return litSignalReport.groups;
+    return litSignalReport.groups.filter(
+      (g) => g.ingredient.toLowerCase().includes(kw) || g.pt.toLowerCase().includes(kw)
+    );
+  }, [litSignalReport, litFilter]);
 
   useEffect(() => {
     const sales = parseFloat(salesVolume);
@@ -698,6 +714,80 @@ export const MonitorMode = React.memo(({
                 </div>
               </div>
           )}
+
+          {/* Literature signal aggregation — separate data source & methodology from the Poisson CI report above. */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-3">
+              <h3 className="font-bold flex items-center gap-2">
+                <FlaskConical size={18} />
+                文獻訊號監測（成分 × MedDRA PT 聚合）
+              </h3>
+              <div className="text-xs text-slate-400" title="質化文獻計數聚合，非統計顯著性檢定；資料來源為「文獻庫」而非本頁季度通報數據，與上方 Poisson exact 95% CI 分析互為獨立、互補的訊號來源。">
+                方法論：質化計數聚合（非統計顯著性檢定）
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Search size={14} className="text-slate-400" />
+                <input
+                  type="text"
+                  value={litFilter}
+                  onChange={(e) => setLitFilter(e.target.value)}
+                  placeholder="以成分或 MedDRA PT 關鍵字篩選..."
+                  className="flex-1 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-brand-500 outline-none"
+                />
+                <span className="text-xs text-slate-400 whitespace-nowrap">
+                  已分析 {litSignalReport.analysedRecords} 筆
+                  {litSignalReport.skipped > 0 && `，${litSignalReport.skipped} 筆待結構化抽取`}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto border rounded-lg border-slate-200 max-h-[400px] overflow-y-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-4 py-2.5">成分</th>
+                      <th className="px-4 py-2.5">MedDRA PT</th>
+                      <th className="px-4 py-2.5">SOC</th>
+                      <th className="px-4 py-2.5 text-center">文獻數</th>
+                      <th className="px-4 py-2.5 text-center">嚴重數</th>
+                      <th className="px-4 py-2.5">PMIDs</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {litGroups.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                          {literatureRecords.length === 0
+                            ? '文獻庫尚無資料，請至「文獻檢索」建立監測'
+                            : litFilter
+                              ? '無符合篩選條件的訊號群組'
+                              : '尚無已完成結構化抽取的文獻可聚合，請至「文獻庫」執行批次抽取'}
+                        </td>
+                      </tr>
+                    ) : litGroups.map((g, idx) => {
+                      const flagged = g.count >= 3 || g.seriousCount > 0;
+                      return (
+                        <tr key={idx} className={flagged ? 'bg-rose-50' : 'hover:bg-slate-50'}>
+                          <td className="px-4 py-2.5 font-medium text-slate-800">{g.ingredient}</td>
+                          <td className="px-4 py-2.5 text-slate-700">
+                            {g.pt}
+                            <span className={`ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${g.matched ? 'bg-green-100 text-green-700 border-green-300' : 'bg-slate-100 text-slate-500 border-slate-300'}`}>
+                              {g.matched ? '詞典命中' : 'AI推論'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500 italic">{g.soc}</td>
+                          <td className="px-4 py-2.5 text-center font-mono">{g.count}</td>
+                          <td className="px-4 py-2.5 text-center font-mono text-rose-600">{g.seriousCount || '—'}</td>
+                          <td className="px-4 py-2.5 text-[10px] font-mono text-slate-400 max-w-xs truncate" title={g.pmids.join(', ')}>{g.pmids.join(', ') || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

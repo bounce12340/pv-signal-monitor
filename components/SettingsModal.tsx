@@ -5,6 +5,7 @@ import {
   settings, AiSettings, SignalRuleConfig,
   DEFAULT_AI_SETTINGS, DEFAULT_RULE_CONFIG,
 } from '../services/settings';
+import { fetchModelList } from '../services/llm';
 import { KeyRound, SlidersHorizontal, Check } from 'lucide-react';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
@@ -17,6 +18,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
   const [ai, setAi] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [rules, setRules] = useState<SignalRuleConfig>(DEFAULT_RULE_CONFIG);
   const [saved, setSaved] = useState(false);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -25,6 +27,20 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
       setSaved(false);
     }
   }, [isOpen]);
+
+  // Live model list for the datalist. Only OpenAI-compatible endpoints expose
+  // GET /models; failures degrade silently to a plain free-text field.
+  useEffect(() => {
+    if (!isOpen || ai.provider !== 'openai-compatible') {
+      setModelOptions([]);
+      return;
+    }
+    let stale = false;
+    fetchModelList(ai.baseUrl, ai.apiKey).then((list) => {
+      if (!stale) setModelOptions(list);
+    });
+    return () => { stale = true; };
+  }, [isOpen, ai.provider, ai.baseUrl, ai.apiKey]);
 
   const handleSave = () => {
     settings.saveAi(ai);
@@ -74,13 +90,30 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
               </select>
             </div>
             <div>
-              <label className={labelCls}>模型名稱</label>
+              <label className={labelCls}>
+                模型名稱
+                {modelOptions.length > 0 && (
+                  <span className="ml-1 font-normal text-slate-400">
+                    （{modelOptions.length} 個可選，點欄位挑選或自行輸入）
+                  </span>
+                )}
+              </label>
               <input
+                list="ai-model-options"
                 value={ai.model}
                 onChange={(e) => setAi({ ...ai, model: e.target.value })}
-                placeholder={ai.provider === 'gemini' ? 'gemini-3-flash-preview' : 'anthropic/claude-sonnet-5'}
+                placeholder={
+                  ai.provider === 'gemini'
+                    ? 'gemini-3.5-flash'
+                    : ai.baseUrl
+                      ? 'anthropic/claude-sonnet-5'
+                      : '留空＝伺服器預設 (deepseek-v4-pro)'
+                }
                 className={`${inputCls} font-mono`}
               />
+              <datalist id="ai-model-options">
+                {modelOptions.map((m) => <option key={m} value={m} />)}
+              </datalist>
             </div>
           </div>
           <div>

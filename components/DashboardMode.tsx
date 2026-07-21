@@ -4,7 +4,7 @@ import { currentQuarter, buildOverview } from '../services/dashboard';
 import { AppMode } from '../types';
 import {
   LayoutDashboard, AlertTriangle, TrendingUp, CalendarClock,
-  CheckCircle2, ArrowRight, FileText,
+  CheckCircle2, ArrowRight, FileText, ClipboardCheck,
 } from 'lucide-react';
 
 interface DashboardModeProps {
@@ -12,10 +12,11 @@ interface DashboardModeProps {
   monitorBatches: MonitorBatch[];
   setSelectedProductId: (id: string) => void;
   setActiveMode: (mode: AppMode) => void;
+  pendingLitCount: number;
 }
 
 export const DashboardMode = ({
-  savedProducts, monitorBatches, setSelectedProductId, setActiveMode,
+  savedProducts, monitorBatches, setSelectedProductId, setActiveMode, pendingLitCount,
 }: DashboardModeProps) => {
   const quarter = currentQuarter();
   const overviews = useMemo(
@@ -80,6 +81,19 @@ export const DashboardMode = ({
           </div>
         )}
       </div>
+
+      {/* Literature review to-do reminder */}
+      {pendingLitCount > 0 && (
+        <button
+          onClick={() => setActiveMode('litReview')}
+          className="w-full text-left p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 flex items-center gap-3 hover:bg-amber-100 transition-colors"
+        >
+          <ClipboardCheck size={18} className="shrink-0" />
+          <span>
+            文獻待核閱：<span className="font-bold">{pendingLitCount}</span> 篇尚未核閱，點此前往「文獻核閱」處理。
+          </span>
+        </button>
+      )}
 
       {/* Product cards */}
       {overviews.length > 0 && (

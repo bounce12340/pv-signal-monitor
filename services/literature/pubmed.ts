@@ -1,0 +1,197 @@
+// PubMed retrieval via NCBI E-utilities (esearch + efetch + XML parsing).
+// This is not an LLM call, so it lives apart from the unified LLM client.
+
+// NCBI E-utilities API key (optional). Set it to raise the rate limit to
+// 10 req/s. This is a data-source key, not an LLM endpoint variable.
+const NCBI_API_KEY: string = (import.meta as any).env?.VITE_NCBI_API_KEY || '';
+
+// Max PMIDs pulled per efetch page (paged retrieval).
+const EFETCH_CHUNK = 100;
+
+function ncbiFetch(url: string): Promise<Response> {
+  return fetch(NCBI_API_KEY ? `${url}&api_key=${NCBI_API_KEY}` : url);
+}
+
+function ncbiPause(): Promise<void> {
+  // NCBI guidance: 3 req/s without a key, 10 req/s with one.
+  return new Promise((r) => setTimeout(r, NCBI_API_KEY ? 110 : 350));
+}
+
+export interface PubMedQueryInput {
+  ingredients: string[];
+  aeTerms: string[];
+  exclusions: string[];
+}
+
+/**
+ * Assemble a PubMed boolean query string from the search form's parsed
+ * fields: ingredients OR'd together, AE terms AND'd in (OR'd among
+ * themselves), exclusions NOT'd out. A term containing `*` (truncation) or
+ * `"` (an explicit phrase) is passed through unquoted; everything else is
+ * wrapped in quotes as an exact phrase.
+ */
+export function buildPubMedQuery({ ingredients, aeTerms, exclusions }: PubMedQueryInput): string {
+  const quote = (t: string) => (/[*"]/.test(t) ? t : `"${t}"`);
+  const ingredientsClause = ingredients.map((i) => `("${i}")`).join(' OR ');
+  const aeClause = aeTerms.length > 0 ? ` AND (${aeTerms.map(quote).join(' OR ')})` : '';
+  const exclusionClause = exclusions.map((t) => ` NOT (${quote(t)})`).join('');
+  return `(${ingredientsClause})${aeClause}${exclusionClause}`;
+}
+
+/**
+ * Precise, reproducible PubMed search via NCBI E-utilities.
+ * maxResults: max records returned (paged; default 100).
+ */
+export async function performPubMedSearch(
+  query: string,
+  _ingredient: string,
+  dateWindow: { from: string; to: string },
+  maxResults = 100
+): Promise<any[]> {
+  // 1. esearch → PMIDs (up to maxResults).
+  // datetype=edat filters by the date the article was *added to PubMed* (Entrez
+  // date), always precise to the day — the right basis for "what newly appeared
+  // this monitoring window". pdat (publication date) is looser for articles with
+  // year-only or epub-ahead-of-print dates and was the source of confusing
+  // pre-window hits.
+  const minDate = dateWindow.from.replace(/-/g, '/');
+  const maxDate = dateWindow.to.replace(/-/g, '/');
+  const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&mindate=${minDate}&maxdate=${maxDate}&datetype=edat&retmode=json&retmax=${maxResults}`;
+
+  const searchRes = await ncbiFetch(searchUrl);
+  if (!searchRes.ok) throw new Error(`PubMed esearch 失敗 (HTTP ${searchRes.status})`);
+  const searchData = await searchRes.json();
+  const pmids: string[] = searchData.esearchresult?.idlist || [];
+  if (pmids.length === 0) return [];
+
+  // 2. efetch in pages (EFETCH_CHUNK per call), pausing between pages.
+  const results: any[] = [];
+  for (let start = 0; start < pmids.length; start += EFETCH_CHUNK) {
+    const chunk = pmids.slice(start, start + EFETCH_CHUNK);
+    await ncbiPause();
+    const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${chunk.join(',')}&retmode=xml`;
+    const fetchRes = await ncbiFetch(fetchUrl);
+    if (!fetchRes.ok) throw new Error(`PubMed efetch 失敗 (HTTP ${fetchRes.status})`);
+    const xmlText = await fetchRes.text();
+    results.push(...parseArticles(xmlText));
+  }
+  return results;
+}
+
+/** Parse the efetch XML into article fields. */
+export function parseArticles(xmlText: string): any[] {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+  if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
+    throw new Error('PubMed 回傳的 XML 無法解析');
+  }
+  const articles = xmlDoc.getElementsByTagName('PubmedArticle');
+
+  const results = [];
+  for (let i = 0; i < articles.length; i++) {
+    const article = articles[i];
+    const pmid = article.querySelector('PMID')?.textContent?.trim();
+    const title = article.querySelector('ArticleTitle')?.textContent?.trim();
+
+    // Assemble the abstract (some are segmented; keep labels for clarity).
+    const abstractTexts = article.getElementsByTagName('AbstractText');
+    let abstract = '';
+    for (let j = 0; j < abstractTexts.length; j++) {
+      const label = abstractTexts[j].getAttribute('Label');
+      const text = abstractTexts[j].textContent?.trim() || '';
+      abstract += (label ? `${label}: ` : '') + text + ' ';
+    }
+
+    // Journal name: read Journal > Title explicitly to avoid MeSH <Title>.
+    const journal =
+      article.querySelector('Journal > Title')?.textContent?.trim() ||
+      article.querySelector('MedlineJournalInfo > MedlineTA')?.textContent?.trim() ||
+      '';
+
+    const date = extractPubDate(article);
+
+    if (pmid && title) {
+      results.push({
+        pmid,
+        title,
+        date,
+        journal,
+        summary: abstract.trim(),
+        url: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+      });
+    }
+  }
+  return results;
+}
+
+const MONTH_MAP: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+  // Seasons map to their first (northern-hemisphere) month.
+  spring: '04', summer: '07', fall: '10', autumn: '10', winter: '01',
+};
+
+/**
+ * Resolve a Month/Season token to a two-digit month, or '' when undeterminable.
+ * Handles numbers ("7"), English months ("Jul"/"July"), seasons ("Spring"),
+ * and ranges ("Jul-Aug", "Jan-Feb") by taking the first segment.
+ */
+export function resolveMonth(raw: string | undefined): string {
+  if (!raw) return '';
+  const token = raw.trim().toLowerCase();
+  if (/^\d{1,2}$/.test(token)) {
+    const n = parseInt(token, 10);
+    return n >= 1 && n <= 12 ? String(n).padStart(2, '0') : '';
+  }
+  const first = token.split(/[-–/]/)[0].trim();
+  return MONTH_MAP[first] ?? MONTH_MAP[first.slice(0, 3)] ?? '';
+}
+
+/** 'YYYY-MM-DD' from an element with numeric Year/Month/Day, else ''. */
+function ymd(el: Element | null): string {
+  if (!el) return '';
+  const year = el.querySelector('Year')?.textContent?.trim();
+  const month = resolveMonth(el.querySelector('Month')?.textContent?.trim());
+  const dayRaw = el.querySelector('Day')?.textContent?.trim() || '';
+  const day = /^\d{1,2}$/.test(dayRaw) ? dayRaw.padStart(2, '0') : '';
+  if (!year || !month || !day) return '';
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Best-available publication date from a PubmedArticle node, as 'YYYY-MM-DD'.
+ * Prefers the electronic <ArticleDate> (usually precise to the day and closest
+ * to when the article actually appeared); falls back to <PubDate>, parsing
+ * Season and month ranges, and only pads to -01-01 when nothing finer exists.
+ */
+export function extractPubDate(article: Element): string {
+  // Electronic ArticleDate first — resolves the common case where JournalIssue
+  // PubDate carries only a Year (which previously displayed as a false Jan 1).
+  const fromArticleDate = ymd(
+    article.querySelector('ArticleDate[DateType="Electronic"]') ||
+    article.querySelector('ArticleDate')
+  );
+  if (fromArticleDate) return fromArticleDate;
+
+  const pubDate =
+    article.querySelector('Article JournalIssue PubDate') || article.querySelector('PubDate');
+  if (!pubDate) return '';
+
+  // MedlineDate e.g. "2026 Jan-Feb" / "2026 Spring" / "2026".
+  const medline = pubDate.querySelector('MedlineDate')?.textContent?.trim();
+  if (medline) {
+    const y = medline.match(/\d{4}/)?.[0];
+    if (!y) return '';
+    return `${y}-${resolveMonth(medline.replace(y, '').trim()) || '01'}-01`;
+  }
+
+  const year = pubDate.querySelector('Year')?.textContent?.trim();
+  if (!year) return '';
+  const month = resolveMonth(
+    pubDate.querySelector('Month')?.textContent?.trim() ||
+    pubDate.querySelector('Season')?.textContent?.trim()
+  );
+  const dayRaw = pubDate.querySelector('Day')?.textContent?.trim() || '';
+  const day = month && /^\d{1,2}$/.test(dayRaw) ? dayRaw.padStart(2, '0') : '01';
+  return `${year}-${month || '01'}-${day}`;
+}
