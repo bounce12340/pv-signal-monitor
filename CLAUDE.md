@@ -21,9 +21,14 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   must NOT be routed through `storage.ts` or added to a `*_KEY_LIST` — doing so would pull it into
   `db.exportAll`'s D1 snapshot, replicate one device's cursor to every other device, and break
   drift detection.
-- **worker/index.ts** is the only server-side code. It has no knowledge of PV domain logic — it
-  only proxies `/llm/*` and `/ollama-cloud/*` to an OpenAI-compatible upstream and persists sync
-  snapshots to D1 under `/api/*`.
+- **worker/index.ts** routes requests. By itself it has no knowledge of PV domain logic — it
+  proxies `/llm/*` and `/ollama-cloud/*` to an OpenAI-compatible upstream and persists sync
+  snapshots to D1 under `/api/sync*`.
+- **worker/ae/** is the adverse-event (AE) case API (`/api/ae-reports*`, `/api/me`), ported verbatim
+  from PV-Link (plain JS; `services/ae/caseWorkModel.js` is shared with it). `worker/index.ts` only
+  verifies identity and hands it the AE bindings (`AE_DB`, `AE_FILES`) — never `DB`, so AE code can't
+  touch the sync snapshots and vice versa. `services/ae/aeReport.ts` is the frontend domain model whose
+  seriousness/due-date rules `worker/ae/ae.js` mirrors; `worker/ae/ae.test.ts` cross-checks the two.
 
 ## Invariants that will silently break things if violated
 
@@ -41,6 +46,16 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   in-memory cache hydrated at boot (`index.tsx` → `initStorage`). Don't add new persisted keys
   without adding them to the relevant `*_KEY_LIST` export, or they won't be hydrated, migrated, or
   captured in the D1 sync snapshot (`db.exportAll`/`importAll`, schema `pv-signal-monitor-backup`).
+- AE API identity comes **only** from a verified Access JWT (`worker/accessJwt.ts`: signature, `iss`,
+  `aud`, `exp`, pinned RS256) — not from the `Cf-Access-Authenticated-User-Email` header `/api/sync`
+  uses. The actor is written into an append-only audit trail (`ae_audit`, guarded by DB triggers), so
+  no request content may ever choose it. Half-configured Access (`ACCESS_TEAM_DOMAIN` without
+  `ACCESS_AUD` or vice versa) is a 503, a missing/invalid token a 401.
+- AE roles are enforced in `worker/ae/ae.js`, not in the UI: anyone not listed as PV (`AE_PV_EMAILS`
+  secret or `ae_users.role = 'pv'`) is a rep and only sees cases they submitted. `AE_PV_EMAILS` holds
+  real staff addresses — `wrangler secret put` only, never `vars`.
+- AE schema changes (`worker/ae/schema.sql`, `worker/ae/migrations/`) are applied to D1 by hand after a
+  backup; CI never runs migrations.
 - MedDRA seed dictionary (`services/literature/meddra.ts`) is a small hand-picked list, not a
   licensed MedDRA distribution — don't treat an unmatched PT as an error; `matched: false` is an
   expected, common outcome that the UI must keep surfacing to the user for manual SOC assignment.
@@ -49,7 +64,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 13 test files / 94 tests passing
+npm test           # currently 20 test files / 285 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
@@ -59,3 +74,8 @@ npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning i
 `worker/index.ts`), and — for the platform-default LLM proxy and the Ollama-Cloud alias to actually
 authenticate — the `OLLAMA_API_KEY` Worker secret. `wrangler.jsonc` `vars.LLM_BASE_URL` controls the
 upstream for `/llm/*`; the app itself never reads a `.env` file.
+
+The AE case API additionally binds the existing PV-Link D1 database `pv-link-ae` (`AE_DB`) and R2
+bucket `pv-link-ae-attachments` (`AE_FILES`), verifies Access JWTs against `ACCESS_TEAM_DOMAIN` /
+`ACCESS_AUD` (the AUD tag of the pv.uic-ai.com Access application), and needs the `AE_PV_EMAILS`
+secret before anyone is treated as PV staff.
