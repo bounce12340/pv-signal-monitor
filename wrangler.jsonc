@@ -15,6 +15,22 @@
       "binding": "DB",
       "database_name": "pv-signal-monitor",
       "database_id": "ba40bffa-f460-4aa5-8ba9-24141688c1eb"
+    },
+    // AE case database (worker/ae/). Already provisioned and migrated by
+    // PV-Link, whose Worker still serves pvlink.uic-ai.com from the same data
+    // until cutover. Schema changes are applied by hand (worker/ae/migrations),
+    // never from CI.
+    {
+      "binding": "AE_DB",
+      "database_name": "pv-link-ae",
+      "database_id": "9493b7d2-719a-4fd6-9bd1-465c4ea19756"
+    }
+  ],
+  // AE attachments (photos of packs, lab reports). D1 holds only pointers.
+  "r2_buckets": [
+    {
+      "binding": "AE_FILES",
+      "bucket_name": "pv-link-ae-attachments"
     }
   ],
   // Fixed-window rate limiter for /llm/* and /ollama-cloud/* (worker/index.ts
@@ -37,7 +53,16 @@
     // upstream today.
     "LLM_MODEL": "deepseek-v4-pro",
     // Per-IP requests/minute before /llm and /ollama-cloud return 429.
-    "RATE_LIMIT_MAX": "30"
+    "RATE_LIMIT_MAX": "30",
+    // Access application protecting pv.uic-ai.com. The AE API verifies the
+    // Cf-Access-Jwt-Assertion against these (worker/accessJwt.ts). The AUD tag
+    // identifies the application; it is not a secret.
+    "ACCESS_TEAM_DOMAIN": "uic-ai.cloudflareaccess.com",
+    "ACCESS_AUD": "1a3bc6605a1b08aae51afeff6be72815cf77f658b1e69086ad2c70fb4679a494",
+    // Default reporter organisation (CIOMS 24a) for new reporter profiles.
+    "AE_ORG_NAME": "天義企業股份有限公司"
+    // AE_PV_EMAILS (PV staff bootstrap list) is a secret:
+    //   npx wrangler secret put AE_PV_EMAILS
   },
   "assets": {
     "directory": "./dist",

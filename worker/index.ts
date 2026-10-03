@@ -4,6 +4,12 @@
 // OpenAI-compatible upstream (no CORS upstream), and exposes the /api/sync
 // endpoints backed by D1 for cross-device data sync.
 //
+// It also hosts the adverse-event (AE) case API ported from PV-Link
+// (/api/ae-reports*, /api/me — see worker/ae/). Unlike /api/sync, that API
+// identifies the caller only from a *verified* Access JWT (worker/accessJwt.ts):
+// its actor goes into an append-only audit trail, so it must not rest on a
+// header that is merely expected to have been set upstream.
+//
 // Identity for /api/* comes from the Cf-Access-Authenticated-User-Email
 // header that Cloudflare Access injects after login. The only route to this
 // Worker is the custom domain in wrangler.jsonc, which sits entirely behind
@@ -11,6 +17,10 @@
 // legitimate one. The /llm
 // and /ollama-cloud routes rely on that same perimeter (no per-request
 // identity check, no CORS allowlist needed since callers are same-origin).
+
+import { verifyAccessJwt, AccessPayload } from './accessJwt';
+// Ported verbatim from PV-Link (plain JS, already covered by its own tests).
+import { handleAeRequest } from './ae/ae.js';
 
 // Minimal D1 typings so the project needs no @cloudflare/workers-types dep.
 interface D1PreparedStatement {
@@ -52,6 +62,22 @@ interface Env {
   // PV-Link's worker. Unbound → limiter is skipped (fail-open).
   RATE_LIMIT?: KVNamespace;
   RATE_LIMIT_MAX?: string;
+  // ── AE case API (worker/ae/) ──
+  // The AE database PV-Link's Worker already uses; both Workers point at the
+  // same data, so moving the API here needs no data migration. Kept separate
+  // from DB (sync snapshots) on purpose: the AE code is handed only its own
+  // bindings and can never read or write the snapshots table.
+  AE_DB?: unknown;
+  // Attachment blobs (R2). D1 only stores pointers.
+  AE_FILES?: unknown;
+  // Bootstrap list of PV staff (comma-separated). Set via
+  // `wrangler secret put AE_PV_EMAILS` — real staff addresses stay out of git.
+  AE_PV_EMAILS?: string;
+  // Default reporter organisation (CIOMS 24a) for new reporter profiles.
+  AE_ORG_NAME?: string;
+  // Cloudflare Access application for pv.uic-ai.com (both required, or 503).
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
 }
 
 // Legacy /ollama-cloud/* clients (SettingsModal's "Ollama Cloud" preset) send
@@ -78,6 +104,47 @@ function identity(request: Request, env: Env): string | null {
   // wrangler dev runs without Access in front; never reachable in production.
   if (env.DEV_MODE === 'true') return 'dev@local';
   return null;
+}
+
+const isAePath = (pathname: string) => {
+  const path = pathname.replace(/\/+$/, '');
+  return path === '/api/me' || path === '/api/ae-reports' || path.startsWith('/api/ae-reports/');
+};
+
+/**
+ * The verified Access identity for the AE API, or the Response to send instead.
+ * Fails closed: half-configured Access is a 503, a missing or invalid token a
+ * 401 — never an anonymous request that reaches the audit trail.
+ */
+async function aeIdentity(request: Request, env: Env): Promise<AccessPayload | Response> {
+  if (Boolean(env.ACCESS_TEAM_DOMAIN) !== Boolean(env.ACCESS_AUD)) {
+    return json({ error: 'Access configuration incomplete' }, 503);
+  }
+  const token = request.headers.get('Cf-Access-Jwt-Assertion')
+    || (request.headers.get('Cookie') || '').match(/(?:^|;\s*)CF_Authorization=([^;]+)/)?.[1];
+  if (!token) {
+    // wrangler dev runs without Access in front; never reachable in production.
+    if (env.DEV_MODE === 'true') return { email: 'dev@local' };
+    return json({ error: 'unauthorized: missing Access token' }, 401);
+  }
+  if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) {
+    return json({ error: 'Access verification not configured' }, 503);
+  }
+  try {
+    return await verifyAccessJwt(token, env.ACCESS_TEAM_DOMAIN, env.ACCESS_AUD);
+  } catch (e) {
+    console.log('access jwt verify failed:', (e as Error).message);
+    return json({ error: 'unauthorized' }, 401);
+  }
+}
+
+async function handleAe(request: Request, env: Env, url: URL): Promise<Response> {
+  const identity = await aeIdentity(request, env);
+  if (identity instanceof Response) return identity;
+  const aeEnv = { DB: env.AE_DB, AE_FILES: env.AE_FILES, AE_PV_EMAILS: env.AE_PV_EMAILS, AE_ORG_NAME: env.AE_ORG_NAME };
+  // Same-origin only, so no CORS headers.
+  const response = await handleAeRequest(request, aeEnv, url, identity, {});
+  return response ?? json({ error: 'not found' }, 404);
 }
 
 async function handleSync(request: Request, env: Env, url: URL): Promise<Response> {
@@ -212,6 +279,10 @@ async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute)
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (isAePath(url.pathname)) {
+      return handleAe(request, env, url);
+    }
 
     if (url.pathname.startsWith('/api/')) {
       return handleSync(request, env, url);
