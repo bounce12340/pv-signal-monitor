@@ -17,8 +17,8 @@
 | 2 | 服務層：`aeApi`、`aeSubmission`、`caseWork`、`taipeiTime`（CIOMS 匯出已在 `services/literature/cioms.ts`，內容相同） | [#3](https://github.com/bounce12340/pv-signal-monitor/pull/3) |
 | 3 | 業務手機通報 `#/report`、角色分流、`/llm/*` 限 pv | [#4](https://github.com/bounce12340/pv-signal-monitor/pull/4) |
 | 3a | 個案編號改由 Worker 配發 | [#5](https://github.com/bounce12340/pv-signal-monitor/pull/5) |
-| 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | 進行中 |
-| 5 | 切換上線（使用者操作，見下方清單） | 待做 |
+| 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | [#6](https://github.com/bounce12340/pv-signal-monitor/pull/6) |
+| 5 | 切換上線（使用者操作） | 清單見 [`ae-cutover.md`](ae-cutover.md)；尚未執行 |
 
 ## PR 1 做了什麼
 
@@ -125,15 +125,13 @@ PV-Link 在前端以「看得到的個案」配號，但手機看不到別人的
 
 ## 切換上線清單（PR 5，使用者操作）
 
-1. `npx wrangler secret put AE_PV_EMAILS`（pv-signal-monitor 這支 Worker；逗號分隔的**個人**公司信箱）。
-2. 確認 PR 3 的 `/llm/*` 角色限制已部署——之後才能把業務加進 Access，否則業務可用公司的 LLM 額度。
-3. pv.uic-ai.com 的 Access policy 加入業務：**逐一列出個人公司信箱**，不可用 `@domain` 或 `@gmail.com` 規則。
-4. 依虛擬測試個案文件送一筆測試個案，在 pv.uic-ai.com 驗收：稽核軌跡操作者為驗證過的信箱。
-   （PV-Link 的 `docs/uat-demo-case.md` 寫的是 pvlink 網址與舊選單，PR 5 寫清單時改寫成 pv.uic-ai.com 版。）
-5. 轉址前請業務打開 PV-Link，確認沒有「N 筆待補送」的提示：outbox 存在各自手機瀏覽器的 pvlink.uic-ai.com 網域底下，
-   不會跟著搬到 pv.uic-ai.com，轉址後就補送不了。
-6. `pvlink.uic-ai.com` 轉址到 `pv.uic-ai.com/#/report`。
-7. 撤除 PV-Link 的 Pages 專案——同時解決 `pv-link-auditor.pages.dev` 未受 Access 保護的缺口。
+完整步驟、驗收方式與回復方式見 [`ae-cutover.md`](ae-cutover.md)，取代原本這裡的七點摘要。順序重點：
+
+1. 先設 `AE_PV_EMAILS` secret，再部署 `main`（否則所有人的 AI 功能 403）。
+2. 藥安帳號在 pv.uic-ai.com 驗收虛擬個案（取代 PV-Link `docs/uat-demo-case.md` 的 pvlink 版）。
+3. 決定 `/api/sync` 是否先限制為 PV，再加一個測試業務驗角色分權，之後才逐一加入全體業務。
+4. 業務清空 PV-Link 的待補送佇列後，`pvlink.uic-ai.com` 才轉址（目標 `https://pv.uic-ai.com/`，先 302）。
+5. 最後撤除 PV-Link 的 Pages 專案與 Worker；共用的 D1 `pv-link-ae`、R2、KV **不可刪**。
 
 ## 不可違反的條件
 
