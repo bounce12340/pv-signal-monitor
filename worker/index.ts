@@ -14,13 +14,13 @@
 // header that Cloudflare Access injects after login. The only route to this
 // Worker is the custom domain in wrangler.jsonc, which sits entirely behind
 // Access (workers.dev is off), so a request without that header is not a
-// legitimate one. The /llm
-// and /ollama-cloud routes rely on that same perimeter (no per-request
-// identity check, no CORS allowlist needed since callers are same-origin).
+// legitimate one. The /llm and /ollama-cloud routes additionally require the
+// PV role (see llmGate): reps get into Access to file AE reports, and must not
+// be able to spend the OLLAMA_API_KEY those routes inject.
 
 import { verifyAccessJwt, AccessPayload } from './accessJwt';
 // Ported verbatim from PV-Link (plain JS, already covered by its own tests).
-import { handleAeRequest } from './ae/ae.js';
+import { handleAeRequest, resolveRole } from './ae/ae.js';
 
 // Minimal D1 typings so the project needs no @cloudflare/workers-types dep.
 interface D1PreparedStatement {
@@ -147,6 +147,21 @@ async function handleAe(request: Request, env: Env, url: URL): Promise<Response>
   return response ?? json({ error: 'not found' }, 404);
 }
 
+/**
+ * PV-only gate for the LLM proxies, or the Response to send instead. Reps are
+ * let into Access to file AE reports; without this they could spend the
+ * company's OLLAMA_API_KEY. Same verified identity and role source as the AE
+ * API (AE_PV_EMAILS secret, then ae_users.role), and it fails closed: anyone
+ * not listed as PV — everyone, if neither source is configured or AE_DB is
+ * unbound — gets a 403.
+ */
+async function llmGate(request: Request, env: Env): Promise<Response | null> {
+  const identity = await aeIdentity(request, env);
+  if (identity instanceof Response) return identity;
+  const role = await resolveRole({ DB: env.AE_DB, AE_PV_EMAILS: env.AE_PV_EMAILS }, identity.email);
+  return role === 'pv' ? null : json({ error: 'forbidden: requires PV role' }, 403);
+}
+
 async function handleSync(request: Request, env: Env, url: URL): Promise<Response> {
   const email = identity(request, env);
   if (!email) return json({ error: 'unauthenticated' }, 401);
@@ -236,6 +251,8 @@ async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute)
   if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
+  const denied = await llmGate(request, env);
+  if (denied) return denied;
   const upstreamPath = url.pathname.slice(route.prefix.length);
   if (route.requireUpstreamPrefix && !ALLOWED_UPSTREAM_PREFIXES.some((p) => upstreamPath.startsWith(p))) {
     return new Response('Not found', { status: 404 });

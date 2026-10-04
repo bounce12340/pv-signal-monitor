@@ -6,3 +6,9 @@ declare module 'pdfjs-dist/build/pdf.worker.min.mjs?url' {
   const url: string;
   export default url;
 }
+
+// Vite's import.meta.env. Only DEV is read (components/ae/Root.tsx); the
+// production build replaces it with `false`.
+interface ImportMeta {
+  readonly env: { readonly DEV: boolean; readonly [key: string]: unknown };
+}

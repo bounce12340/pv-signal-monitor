@@ -31,9 +31,18 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   keys are deliberately in **no** `*_KEY_LIST` and not in `db.exportAll`: they are per-device (a
   replicated outbox would be resubmitted by every device) and hold patient data, which belongs only
   in `AE_DB`.
+- **components/ae/** (+ `i18n/`, `theme/`) are the AE screens: `Root.tsx` asks `/api/me` for the role and
+  routes reps (any hash) and `#/report` to `AEReportMobile`, everyone else to `App`. Only AE screens are
+  wrapped in `AEScope` (`.ae-theme` in `index.css`): their semantic colours, indigo brand, fonts, focus
+  ring, reduced-motion and class-based dark mode are scoped to that wrapper so the host app is pixel-for-
+  pixel unchanged — never add an unscoped rule to the AE section of `index.css` (a test enforces it).
+  Their language/theme prefs go through `services/ae/prefs.ts` (hydrated at boot via
+  `AE_PREFS_KEY_LIST`, deliberately not in `db.exportAll`).
 - **worker/index.ts** routes requests. By itself it has no knowledge of PV domain logic — it
   proxies `/llm/*` and `/ollama-cloud/*` to an OpenAI-compatible upstream and persists sync
-  snapshots to D1 under `/api/sync*`.
+  snapshots to D1 under `/api/sync*`. The LLM proxies are **PV-only** (`llmGate`: verified Access JWT +
+  the AE role from `AE_PV_EMAILS`/`ae_users`, fail closed), because reps get into Access to file AE
+  reports and must not spend `OLLAMA_API_KEY`.
 - **worker/ae/** is the adverse-event (AE) case API (`/api/ae-reports*`, `/api/me`), ported verbatim
   from PV-Link (plain JS; `services/ae/caseWorkModel.js` is shared with it). `worker/index.ts` only
   verifies identity and hands it the AE bindings (`AE_DB`, `AE_FILES`) — never `DB`, so AE code can't
@@ -74,7 +83,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 25 test files / 340 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 31 test files / 405 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
@@ -88,4 +97,6 @@ upstream for `/llm/*`; the app itself never reads a `.env` file.
 The AE case API additionally binds the existing PV-Link D1 database `pv-link-ae` (`AE_DB`) and R2
 bucket `pv-link-ae-attachments` (`AE_FILES`), verifies Access JWTs against `ACCESS_TEAM_DOMAIN` /
 `ACCESS_AUD` (the AUD tag of the pv.uic-ai.com Access application), and needs the `AE_PV_EMAILS`
-secret before anyone is treated as PV staff.
+secret before anyone is treated as PV staff — and since the LLM proxies are PV-only, before
+deploying, or every user's AI features return 403. For `wrangler dev`, put `AE_PV_EMAILS=dev@local` in
+`.dev.vars`.

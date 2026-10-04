@@ -230,8 +230,8 @@ async function saveProfile(env, email, patch) {
   return await loadUserRow(env, key);
 }
 
-/** 查角色：bootstrap 清單優先，其次 ae_users，查無此人一律 rep。 */
-async function resolveRole(env, email) {
+/** 查角色：bootstrap 清單優先，其次 ae_users，查無此人一律 rep。worker/index.ts 的 LLM 代理也用它。 */
+export async function resolveRole(env, email) {
   const boot = bootstrapRole(email, env.AE_PV_EMAILS);
   if (boot) return boot;
   try {
