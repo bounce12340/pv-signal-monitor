@@ -49,6 +49,14 @@ describe('submitAEReport', () => {
     expect(r.version).toBe(0);
   });
 
+  it('takes the case number the Worker assigned', async () => {
+    replies(json({ ok: true, id: 'case-1', version: 0, caseNumber: 'PV-2026-0042' }, 201));
+    const { submitAEReport, report } = await setup();
+    const r = report();
+    await submitAEReport(r);
+    expect(r.caseNumber).toBe('PV-2026-0042');
+  });
+
   it.each([
     ['a network error', new Error('network down')],
     ['a 5xx', new Response('', { status: 503 })],
@@ -130,6 +138,12 @@ describe('case reads and writes', () => {
     replies(new Response('', { status: 500 }));
     const { listAECases } = await setup();
     await expect(listAECases()).rejects.toThrow('HTTP 500');
+  });
+
+  it('returns the server-assigned number when creating a case (e.g. a follow-up)', async () => {
+    replies(json({ ok: true, version: 0, caseNumber: 'PV-2026-0007-F1' }, 201));
+    const { saveAECase, report } = await setup();
+    expect((await saveAECase({ ...report('fu'), caseNumber: 'PV-2026-0007-F9' }, { create: true })).caseNumber).toBe('PV-2026-0007-F1');
   });
 
   it('creates with POST and updates with PATCH on the encoded id', async () => {

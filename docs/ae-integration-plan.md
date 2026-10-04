@@ -15,7 +15,8 @@
 |---|---|---|
 | 1 | Worker：Access JWT 驗證、`/api/ae-reports*`、`/api/me`、AE_DB／AE_FILES 綁定 | [#1](https://github.com/bounce12340/pv-signal-monitor/pull/1) |
 | 2 | 服務層：`aeApi`、`aeSubmission`、`caseWork`、`taipeiTime`（CIOMS 匯出已在 `services/literature/cioms.ts`，內容相同） | [#3](https://github.com/bounce12340/pv-signal-monitor/pull/3) |
-| 3 | 業務手機通報 `#/report`、角色分流、`/llm/*` 限 pv | 進行中 |
+| 3 | 業務手機通報 `#/report`、角色分流、`/llm/*` 限 pv | [#4](https://github.com/bounce12340/pv-signal-monitor/pull/4) |
+| 3a | 個案編號改由 Worker 配發 | 進行中 |
 | 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | 待做 |
 | 5 | 切換上線（使用者操作，見下方清單） | 待做 |
 
@@ -79,10 +80,27 @@ PR 1 暫時拿掉兩段依賴 i18n 的測試，搬 i18n 時要加回：PV-Link `
 
 ## 已知缺口
 
-**個案編號重複（PV-Link 既有問題，PR 3 照搬未修）。** 前端以 `nextCaseNumber(本機看得到的個案, 今天)` 配號，
-但手機看不到別人的個案，等於每次都從空清單起算：所有業務送出的個案都是 `PV-<年>-0001`。
-Worker 照存前端給的號碼，`ae_cases.case_number` 也沒有唯一限制。PV-Link 正式站目前就是這樣運作。
-建議改由 Worker 在建檔時配號（單一 SQL 敘述內取最大號 +1），需要先決定既有重號資料怎麼處理。
+**個案編號重複（PV-Link 既有問題）——新個案已改由 Worker 配號，既有重號待人工決定。**
+PV-Link 在前端以「看得到的個案」配號，但手機看不到別人的個案；依程式邏輯推斷，業務送出的個案都會是 `PV-<年>-0001`
+（Worker 照存，`case_number` 也沒有唯一限制）。正式資料實際重號多少，請用下方的唯讀查詢確認。現在的做法（`worker/ae/ae.js` 的 `caseNumberSql`）：
+
+- 新個案：`PV-<台北年>-<該年最大號 +1>`，取號與寫入在同一個 INSERT 敘述內（原子），前端送的號碼一律不採用。
+  因為取「最大號 +1」，不會再跟既有的 `0001` 撞號。
+- PV 建立的追蹤報告：`<母案編號>-F<n>`（沿用後台慣例）。業務送出的不依 `followUpOfId` 配號。
+- 既有個案的編號不可改（含 PV 編輯）。送出時存進佇列的個案還沒有編號，完成畫面會說明「送達後配發」。
+
+**還沒處理、需要藥安決定的：**
+
+1. **既有的重號資料。** 不能自動改號：編號可能已經寫進送主管機關的 CIOMS／報告，改了就對不上。
+   用下面這個**唯讀**查詢列出重號（結果是真實資料，不要貼進這個公開 repo），由藥安逐案決定是否更正、怎麼留下更正紀錄：
+   ```bash
+   npx wrangler d1 execute pv-link-ae --remote --command \
+     "SELECT case_number, COUNT(*) AS n, GROUP_CONCAT(id) AS ids FROM ae_cases WHERE deleted_at IS NULL GROUP BY case_number HAVING n > 1 ORDER BY case_number"
+   ```
+   若要更正，透過 API／後台操作留下稽核軌跡，不要直接改 D1（目前 API 刻意不允許改號，需要時另開功能）。
+2. **pvlink 在切換前仍會產生 `0001`。** pvlink.uic-ai.com 跑的是 PV-Link 的舊 Worker，與這裡共用同一個 D1，
+   repo 已刪除、無法修。切換上線前的新個案仍會重號；越早切換，要人工處理的越少。
+3. **唯一限制。** 因為已有重號，現在加不了 `UNIQUE(case_number)`。重號清完、pvlink 撤除後，可再補一個 migration（手動套用）。
 
 **`/api/sync` 沒有角色限制。** 業務加進 Access 後，可以直接呼叫 API 在同步用的 `DB` 存一份自己的快照
 （只限自己的信箱，讀不到別人的）。風險低，但切換上線前宜一併限制為 PV。

@@ -43,8 +43,9 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   snapshots to D1 under `/api/sync*`. The LLM proxies are **PV-only** (`llmGate`: verified Access JWT +
   the AE role from `AE_PV_EMAILS`/`ae_users`, fail closed), because reps get into Access to file AE
   reports and must not spend `OLLAMA_API_KEY`.
-- **worker/ae/** is the adverse-event (AE) case API (`/api/ae-reports*`, `/api/me`), ported verbatim
-  from PV-Link (plain JS; `services/ae/caseWorkModel.js` is shared with it). `worker/index.ts` only
+- **worker/ae/** is the adverse-event (AE) case API (`/api/ae-reports*`, `/api/me`), ported from PV-Link
+  (plain JS; `services/ae/caseWorkModel.js` is shared with it; since changed: server-side case numbering,
+  `resolveRole` exported for the LLM gate). `worker/index.ts` only
   verifies identity and hands it the AE bindings (`AE_DB`, `AE_FILES`) — never `DB`, so AE code can't
   touch the sync snapshots and vice versa. `services/ae/aeReport.ts` is the frontend domain model whose
   seriousness/due-date rules `worker/ae/ae.js` mirrors; `worker/ae/ae.test.ts` cross-checks the two.
@@ -73,6 +74,11 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 - AE roles are enforced in `worker/ae/ae.js`, not in the UI: anyone not listed as PV (`AE_PV_EMAILS`
   secret or `ae_users.role = 'pv'`) is a rep and only sees cases they submitted. `AE_PV_EMAILS` holds
   real staff addresses — `wrangler secret put` only, never `vars`.
+- AE case numbers are assigned by the Worker (`caseNumberSql` in `worker/ae/ae.js`, inside the INSERT so
+  it is atomic) and are immutable afterwards; the `case_number` column is the source of truth, never the
+  client's `caseNumber`. Don't reintroduce client-side numbering (`nextCaseNumber`): a rep's phone can't
+  see other cases, which is how every rep case became `PV-<year>-0001`. Legacy duplicates are left for PV
+  to resolve by hand — they may already be cited in regulatory reports.
 - AE schema changes (`worker/ae/schema.sql`, `worker/ae/migrations/`) are applied to D1 by hand after a
   backup; CI never runs migrations.
 - MedDRA seed dictionary (`services/literature/meddra.ts`) is a small hand-picked list, not a
@@ -83,7 +89,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 31 test files / 405 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 32 test files / 417 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 

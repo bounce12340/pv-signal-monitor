@@ -62,7 +62,8 @@ describe('work real SQLite persistence and audit', () => {
    const caseUpdate = await call('PATCH', '/demo', { id: 'demo', version: 0, caseNumber: 'SYNTHETIC-UPDATED', events: [], drugs: [] });
    expect(caseUpdate?.status).toBe(200);
    expect((await caseUpdate?.json()).version).toBe(1);
-   expect((db.prepare('SELECT case_number FROM ae_cases WHERE id=?').get('demo') as any).case_number).toBe('SYNTHETIC-UPDATED');
+   // Case numbers are server-assigned and immutable: the client's 'SYNTHETIC-UPDATED' is ignored.
+   expect((db.prepare('SELECT case_number FROM ae_cases WHERE id=?').get('demo') as any).case_number).toMatch(/^PV-\d{4}-0001$/);
    expect((await (await call('GET', '/demo/work'))?.json()).work.nextAction).toBe('keep');
  });
  it('persists server lifecycle audit, workbench filtering and recipient-isolated notification reads', async () => {

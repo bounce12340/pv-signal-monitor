@@ -86,9 +86,10 @@ describe('AE API database regression', () => {
   });
   it('rejects rep resubmission after PV workflow transition', async () => {
     await request('POST','',report('locked'));
+    const assigned = sql.prepare('SELECT case_number FROM ae_cases WHERE id=?').get('locked')?.case_number;
     sql.prepare("UPDATE ae_cases SET status='triage' WHERE id='locked'").run();
     expect((await request('POST','',report('locked',{caseNumber:'rep-overwrite'})))?.status).toBe(403);
-    expect(sql.prepare('SELECT case_number FROM ae_cases WHERE id=?').get('locked')?.case_number).toBe('locked');
+    expect(sql.prepare('SELECT case_number FROM ae_cases WHERE id=?').get('locked')?.case_number).toBe(assigned);
   });
   it('requires a matching version for PV updates and prevents lost update', async () => {
     await request('POST','',report('versioned'));

@@ -54,6 +54,8 @@ async function postRemote(report: AEReport): Promise<void> {
   const data = await res.json();
   if (!Number.isSafeInteger(data?.version) || data.version < 0) throw new Error('invalid server version');
   report.version = data.version;
+  // 編號由 Worker 配發；完成畫面顯示的就是這個值。
+  if (typeof data?.caseNumber === 'string' && data.caseNumber) report.caseNumber = data.caseNumber;
 }
 
 async function enqueueOutbox(report: AEReport): Promise<void> {
@@ -104,12 +106,15 @@ export async function listAECases(): Promise<AEReport[]> {
  * （例如已被別人軟刪除）」回 404 的守門作用——靜默建回一筆已刪除的個案更糟。
  */
 export async function saveAECase(report: AEReport, opts: { create?: boolean } = {}): Promise<AEReport> {
+  // 回傳的 caseNumber 是 Worker 配發／保留的編號，以它為準（建立追蹤報告時尤其如此）。
+  const withServerNumber = (data: any, fallback: AEReport): AEReport =>
+    data?.case || { ...fallback, ...(typeof data?.caseNumber === 'string' && data.caseNumber ? { caseNumber: data.caseNumber } : {}) };
   if (opts.create) {
     const saved = await callApi('', { method: 'POST', body: JSON.stringify(report) });
-    return (await saved.json()).case || { ...report, version: 0 };
+    return withServerNumber(await saved.json(), { ...report, version: 0 });
   }
   const saved = await callApi(`/${encodeURIComponent(report.id)}`, { method: 'PATCH', body: JSON.stringify(report) });
-  return (await saved.json()).case || { ...report, version: Number(report.version || 0) + 1 };
+  return withServerNumber(await saved.json(), { ...report, version: Number(report.version || 0) + 1 });
 }
 
 /** 刪除個案。後端是**軟刪除**：個案從收件匣消失，但資料列與稽核軌跡都留著。 */
