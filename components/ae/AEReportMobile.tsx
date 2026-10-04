@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AEReport, AEEvent, AEDrug, SeriousnessCriterion,
-  emptyAEReport, emptyEvent, emptyDrug, newId, nextCaseNumber,
+  emptyAEReport, emptyEvent, emptyDrug, newId,
   checkMinimumCriteria, validateAEReport, assessSeriousness, computeCompleteness,
   SERIOUSNESS_CRITERIA, OUTCOME_OPTIONS, ROUTE_OPTIONS, REPORT_SOURCE_OPTIONS,
   YES_NO_UNK_OPTIONS, ACTION_TAKEN_OPTIONS, SEX_OPTIONS, AGE_UNIT_OPTIONS, COUNTRY_OPTIONS,
@@ -199,10 +199,9 @@ const AEReportMobile: React.FC<{
       const now = new Date().toISOString();
       const finalReport: AEReport = {
         ...report,
-        // ⚠️ 已知缺口（沿用 PV-Link 遠端模式的行為）：手機看不到其他人的個案，這裡等於每次都從
-        // 空清單起算，所有業務送出的個案號都會是 PV-<年>-0001；後端也不重編、不檢查唯一。
-        // 要改成由 Worker 在建檔時配號，見 docs/ae-integration-plan.md 的已知缺口。
-        caseNumber: report.caseNumber || nextCaseNumber([], todayIso()),
+        // 個案編號由 Worker 在建檔時配發（worker/ae/ae.js），送達後 submitAEReport 會寫回來。
+        // 刻意送空字串，連還原的草稿裡的舊號也不沿用：存進佇列時畫面不能顯示一個還沒配發的號碼。
+        caseNumber: '',
         status: 'submitted',
         reportDate: report.reportDate || todayIso(),
         narrative: report.narrative || autoNarrative(report, todayIso()),
@@ -1091,7 +1090,7 @@ const DoneScreen: React.FC<{ done: { caseNumber: string; channel: string }; onNe
           {conflicted ? t('ae.submit.conflict') : queued ? t('ae.submit.queued') : t('ae.submit.okRemote')}
         </p>
         <p className="text-xs font-bold text-brand-700 dark:text-brand-300">
-          {t('ae.done.caseNo')}: {done.caseNumber}
+          {done.caseNumber ? `${t('ae.done.caseNo')}: ${done.caseNumber}` : t('ae.done.caseNoPending')}
         </p>
       </div>
       <button onClick={onNew}

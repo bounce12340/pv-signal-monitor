@@ -349,6 +349,8 @@ function rowToReport(row, audit) {
   return {
     ...report,
     id: row.id,
+    // 個案編號以欄位為準（由 upsertCase 配發、之後不可改），不信 payload 裡的值。
+    caseNumber: row.case_number,
     status: row.status,
     version: Number(row.version || 0),
     auditTrail: audit,
@@ -464,6 +466,39 @@ function preserveCodedRepEvents(prior, proposed) {
   return proposed;
 }
 
+// ── 個案編號 ─────────────────────────────────────────────────────────────
+//
+// 由這裡配號，前端送來的 caseNumber 一律不採用。PV-Link 原本在前端以「看得到的個案」算下一號，
+// 但業務手機看不到別人的個案，等於每次從空清單起算，業務送出的個案都會配到 PV-<年>-0001。
+//
+//   • 新個案：PV-<台北年>-<該年最大號 +1，4 位數>。取最大號與寫入在**同一個 INSERT 敘述**裡，
+//     SQLite／D1 單一敘述是原子的，兩筆同時送出也不會拿到同一號。
+//   • PV 建立的追蹤報告（followUpOfId 指向既有個案）：<母案編號>-F<既有追蹤數 +1>，沿用後台原本的慣例。
+//     業務送出的不採用 followUpOfId 配號：否則業務可以把個案掛到別人的母案上、從回應讀到別人的編號。
+//   • 既有個案：編號不可改（UPDATE 不寫 case_number）。編號可能已經寫進送主管機關的報告。
+//
+// 既有的重號資料不在這裡處理：改號會讓已送出的報告對不上，要由藥安人員逐案決定（見 docs/ae-integration-plan.md）。
+// 新號取「該年最大號 +1」，所以不會再跟既有的 0001 撞號。
+export const CASE_NUMBER_PREFIX = 'PV';
+
+/** Asia/Taipei 的西元年。1/1 台北凌晨 0–8 點（UTC 還是前一年）送出的個案也要算新年度。 */
+export function taipeiYear(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric' }).format(date);
+}
+
+/** INSERT 用的配號運算式與它的參數（依 ? 出現順序）。 */
+function caseNumberSql(parentId, year) {
+  const head = `${CASE_NUMBER_PREFIX}-${year}-`;
+  return {
+    sql: `COALESCE(
+      (SELECT p.case_number || '-F' || ((SELECT COUNT(*) FROM ae_cases c WHERE c.follow_up_of_id = p.id) + 1)
+         FROM ae_cases p WHERE p.id = ? AND p.case_number <> ''),
+      ? || printf('%04d', COALESCE((SELECT MAX(CAST(substr(case_number, ?) AS INTEGER)) FROM ae_cases WHERE case_number GLOB ?), 0) + 1)
+    )`,
+    binds: [parentId, head, head.length + 1, `${head}[0-9]*`],
+  };
+}
+
 async function upsertCase(env, report, actor, { role = 'pv', expectedVersion }) {
   const now = new Date().toISOString();
   const mutationId = crypto.randomUUID();
@@ -472,7 +507,7 @@ async function upsertCase(env, report, actor, { role = 'pv', expectedVersion }) 
   if (!report || typeof report !== 'object' || Array.isArray(report)) throw new HttpError(400, 'invalid report');
   for (const field of ['events', 'drugs', 'attachments', 'auditTrail']) if (report[field] !== undefined && !Array.isArray(report[field])) throw new HttpError(400, `invalid ${field}`);
 
-  const existing = await env.DB.prepare(`SELECT id, deleted_at, payload FROM ae_cases WHERE id=?`).bind(id).first();
+  const existing = await env.DB.prepare(`SELECT id, deleted_at, payload, case_number FROM ae_cases WHERE id=?`).bind(id).first();
   if (existing?.deleted_at) throw new HttpError(409, 'case is deleted');
   const { auditTrail, version: _clientVersion, ...rest } = report;
   let persisted = { ...rest };
@@ -486,6 +521,8 @@ async function upsertCase(env, report, actor, { role = 'pv', expectedVersion }) 
       events: preserveCodedRepEvents(prior, persisted.events),
     };
   }
+  // 新個案先放空字串，寫入後由同一批次的 json_set 填入配發的編號；既有個案沿用原編號。
+  persisted = { ...persisted, caseNumber: existing ? str(existing.case_number) : '' };
   const attachmentStatements = [];
   const attachments = await offloadAttachments(env, id, persisted, actor, now, mutationId, attachmentStatements);
   persisted = { ...persisted, attachments };
@@ -496,24 +533,33 @@ async function upsertCase(env, report, actor, { role = 'pv', expectedVersion }) 
     const where = role === 'pv'
       ? `id=? AND deleted_at IS NULL AND version=?`
       : `id=? AND deleted_at IS NULL AND LOWER(submitted_by)=? AND status IN ('draft','submitted') AND version=?`;
-    const binds = [payload,col.case_number,col.status,col.report_type,col.follow_up_of_id,col.awareness_date,col.due_date,col.serious,col.country,col.suspect_drug,col.patient_key,now,mutationId,id];
+    // case_number 刻意不在 SET 裡：編號一經配發就不可改。
+    const binds = [payload,col.status,col.report_type,col.follow_up_of_id,col.awareness_date,col.due_date,col.serious,col.country,col.suspect_drug,col.patient_key,now,mutationId,id];
     if (role !== 'pv') binds.push(normalizeEmail(actor));
     binds.push(expectedVersion);
-    caseStatement = env.DB.prepare(`UPDATE ae_cases SET payload=?,case_number=?,status=?,report_type=?,follow_up_of_id=?,awareness_date=?,due_date=?,serious=?,country=?,suspect_drug=?,patient_key=?,updated_at=?,last_mutation_id=?,version=version+1 WHERE ${where}`).bind(...binds);
+    caseStatement = env.DB.prepare(`UPDATE ae_cases SET payload=?,status=?,report_type=?,follow_up_of_id=?,awareness_date=?,due_date=?,serious=?,country=?,suspect_drug=?,patient_key=?,updated_at=?,last_mutation_id=?,version=version+1 WHERE ${where}`).bind(...binds);
   } else {
     // A concurrent id collision changes zero rows and returns 409; it never becomes an overwrite.
+    const number = caseNumberSql(role === 'pv' ? str(persisted.followUpOfId) : '', taipeiYear(new Date(now)));
     caseStatement = env.DB.prepare(`INSERT OR IGNORE INTO ae_cases (id,payload,case_number,status,report_type,follow_up_of_id,awareness_date,due_date,serious,country,suspect_drug,patient_key,submitted_by,created_at,updated_at,last_mutation_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,payload,col.case_number,col.status,col.report_type,col.follow_up_of_id,col.awareness_date,col.due_date,col.serious,col.country,col.suspect_drug,col.patient_key,actor,now,now,mutationId);
+      SELECT ?,?,${number.sql},?,?,?,?,?,?,?,?,?,?,?,?,?`).bind(id,payload,...number.binds,col.status,col.report_type,col.follow_up_of_id,col.awareness_date,col.due_date,col.serious,col.country,col.suspect_drug,col.patient_key,actor,now,now,mutationId);
   }
+  // 新個案：把剛配發的編號寫回 payload，讓 payload 與欄位一致（只動這次寫入的那一列）。
+  const numberStatements = existing ? [] : [env.DB.prepare(
+    `UPDATE ae_cases SET payload = json_set(payload, '$.caseNumber', case_number) WHERE id=? AND last_mutation_id=?`
+  ).bind(id, mutationId)];
   const entries = [...(auditTrail || [])];
   if (!existing) entries.push({ at: now, action: 'received', detail: `由 ${actor} 送達後台` });
   const audits = entries.filter(e => e && e.action).map(e => env.DB.prepare(
     `INSERT INTO ae_audit (case_id,at,actor,action,detail)
      SELECT ?,?,?,?,? WHERE EXISTS (SELECT 1 FROM ae_cases WHERE id=? AND last_mutation_id=?)`
   ).bind(id,str(e.at)||now,actor,str(e.action),str(e.detail)||null,id,mutationId));
-  const result = await env.DB.batch([caseStatement, ...attachmentStatements, ...audits]);
+  const result = await env.DB.batch([caseStatement, ...numberStatements, ...attachmentStatements, ...audits]);
   if (!result?.[0]?.meta?.changes) throw new HttpError(409, 'case write conflict; reload and retry');
-  return { id, version: existing ? expectedVersion + 1 : 0 };
+  const caseNumber = existing
+    ? str(existing.case_number)
+    : str((await env.DB.prepare(`SELECT case_number FROM ae_cases WHERE id=?`).bind(id).first())?.case_number);
+  return { id, version: existing ? expectedVersion + 1 : 0, caseNumber };
 }
 
 // ── HTTP 處理 ───────────────────────────────────────────────────────────
@@ -606,7 +652,7 @@ export async function handleAeRequest(request, env, url, identity, cors) {
         const expectedVersion = current ? report?.version : undefined;
         if (current && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0)) return json({ error: 'case version is required for retry' }, 409, cors);
         const saved = await upsertCase(env, report, actor, { role, expectedVersion });
-        return json({ ok: true, id: saved.id, version: saved.version }, current ? 200 : 201, cors);
+        return json({ ok: true, id: saved.id, version: saved.version, caseNumber: saved.caseNumber }, current ? 200 : 201, cors);
       }
       return json({ error: 'method not allowed' }, 405, cors);
     }
@@ -657,7 +703,7 @@ export async function handleAeRequest(request, env, url, identity, cors) {
           return json({ error: 'internal work requires dedicated endpoint' }, 400, cors);
         }
         const saved = await upsertCase(env, { ...report, id: caseId }, actor, { role, expectedVersion: report?.version });
-        return json({ ok: true, version: saved.version }, 200, cors);
+        return json({ ok: true, version: saved.version, caseNumber: saved.caseNumber }, 200, cors);
       }
 
       if (request.method === 'DELETE') {

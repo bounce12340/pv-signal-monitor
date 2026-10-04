@@ -49,14 +49,17 @@ afterEach(() => { ui?.unmount(); ui = null; vi.unstubAllGlobals(); vi.restoreAll
 
 describe('submitting a report', () => {
   it('delivers to the same-origin API and clears the draft', async () => {
-    const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, version: 0 }), { status: 201 }));
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, version: 0, caseNumber: 'PV-2026-0042' }), { status: 201 }));
     vi.stubGlobal('fetch', fetch);
     ui = await submitDraft();
     expect(fetch).toHaveBeenCalledWith('/api/ae-reports', expect.objectContaining({ method: 'POST' }));
     const sent = JSON.parse((fetch.mock.calls[0] as any)[1].body);
     expect(sent.reporterName).toBe('Chen');
     expect(sent.status).toBe('submitted');
+    expect(sent.caseNumber).toBe('');
     expect(ui.text()).toContain('Delivered');
+    // The number shown is the one the Worker assigned, not one computed on the phone.
+    expect(ui.text()).toContain('Case number: PV-2026-0042');
     expect(localStorage.getItem('ae_draft')).toBeNull();
   });
 
@@ -67,6 +70,9 @@ describe('submitting a report', () => {
     expect(outbox).toHaveLength(1);
     expect(ui.text()).toMatch(/queue/i);
     expect(ui.text()).not.toContain('Delivered');
+    // No number exists yet; showing one would be a number nobody assigned.
+    expect(ui.text()).toContain('assigned once delivered');
+    expect(ui.text()).not.toMatch(/PV-\d{4}-\d{4}/);
     expect(localStorage.getItem('ae_draft')).toBeNull();
   });
 
