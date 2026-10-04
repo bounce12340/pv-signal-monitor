@@ -66,6 +66,22 @@ export function idbSet(key: string, value: unknown): Promise<void> {
         tx.objectStore(STORE).put(value, key);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
+        // An aborted transaction (e.g. quota exceeded) fires onabort, not
+        // onerror; without this the promise never settles and the caller hangs.
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+      })
+  );
+}
+
+function idbDelete(key: string): Promise<void> {
+  return openDB().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
       })
   );
 }
@@ -133,6 +149,59 @@ export async function loadAsync<T>(key: string): Promise<T | undefined> {
     return undefined;
   } catch {
     return lsGetParsed(key) as T | undefined;
+  }
+}
+
+// --- durable API (awaitable, failure-reporting) ---
+//
+// For data whose loss must be reported rather than swallowed — the AE outbox
+// and form draft (services/ae/storage.ts). Unlike save(), a write resolves only
+// once the value is in IndexedDB or, failing that, localStorage, and rejects if
+// both fail, so the caller can tell the user "not saved anywhere" instead of
+// "queued". These keys bypass the in-memory cache: every read goes to storage,
+// so a second tab's queued report is never overwritten by a stale cached copy.
+// Don't mix them with loadSync/save.
+
+export async function saveDurable(key: string, value: unknown): Promise<void> {
+  try {
+    await idbSet(key, value);
+  } catch {
+    // Rejects (e.g. QuotaExceededError) when localStorage is full too.
+    localStorage.setItem(key, JSON.stringify(value));
+    return;
+  }
+  // IndexedDB now holds the latest value; drop any older fallback copy so
+  // loadDurable can't resurrect it.
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** IndexedDB first; falls back to localStorage when IndexedDB fails or has nothing. */
+export async function loadDurable<T>(key: string): Promise<T | undefined> {
+  try {
+    const v = await idbGet<T>(key);
+    if (v !== undefined) return v;
+  } catch {
+    /* fall through to localStorage */
+  }
+  return lsGetParsed(key) as T | undefined;
+}
+
+/** Removes the key from both stores; rejects only if it may still be readable. */
+export async function removeDurable(key: string): Promise<void> {
+  let idbError: unknown = null;
+  try {
+    await idbDelete(key);
+  } catch (e) {
+    idbError = e;
+  }
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {
+    throw idbError ?? e;
   }
 }
 
