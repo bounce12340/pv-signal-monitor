@@ -13,3 +13,123 @@
   --color-brand-800: #075985;
   --color-brand-900: #0c4a6e;
 }
+
+/* ══ AE 畫面（業務通報、建檔；之後的後台收案）══════════════════════════════════
+   從 PV-Link 搬來的 AE 元件以語意色名寫 class（brand／danger／caution／success、canvas、muted），
+   亮暗色與對比都在 PV-Link 實測過。主系統的 brand 是 sky、AE 的是 indigo，而 sky-600 白底對比
+   只有 4.1:1、不到 WCAG 4.5:1，所以不把 AE 換成主系統色，而是把下面這些規則全部限定在
+   theme/ThemeContext.tsx 的 AEScope 外框（.ae-theme）之內：主系統畫面一個像素都不變。 */
+
+/* 暗色只認 .dark class（AEScope 依使用者選擇掛上），不跟著作業系統偏好走——主系統沒有暗色樣式。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-danger-50: var(--color-rose-50);
+  --color-danger-100: var(--color-rose-100);
+  --color-danger-200: var(--color-rose-200);
+  --color-danger-300: var(--color-rose-300);
+  --color-danger-400: var(--color-rose-400);
+  --color-danger-500: var(--color-rose-500);
+  --color-danger-600: var(--color-rose-600);
+  --color-danger-700: var(--color-rose-700);
+  --color-danger-800: var(--color-rose-800);
+  --color-danger-900: var(--color-rose-900);
+  --color-danger-950: var(--color-rose-950);
+  --color-caution-50: var(--color-amber-50);
+  --color-caution-100: var(--color-amber-100);
+  --color-caution-200: var(--color-amber-200);
+  --color-caution-300: var(--color-amber-300);
+  --color-caution-400: var(--color-amber-400);
+  --color-caution-500: var(--color-amber-500);
+  --color-caution-600: var(--color-amber-600);
+  --color-caution-700: var(--color-amber-700);
+  --color-caution-800: var(--color-amber-800);
+  --color-caution-900: var(--color-amber-900);
+  --color-caution-950: var(--color-amber-950);
+  --color-success-50: var(--color-emerald-50);
+  --color-success-100: var(--color-emerald-100);
+  --color-success-200: var(--color-emerald-200);
+  --color-success-300: var(--color-emerald-300);
+  --color-success-400: var(--color-emerald-400);
+  --color-success-500: var(--color-emerald-500);
+  --color-success-600: var(--color-emerald-600);
+  --color-success-700: var(--color-emerald-700);
+  --color-success-800: var(--color-emerald-800);
+  --color-success-900: var(--color-emerald-900);
+  --color-success-950: var(--color-emerald-950);
+}
+
+/* inline：utility 直接寫入 rgb(var(--canvas))，讓 var 在元素本身解析。若宣告在 :root，
+   --canvas 只存在 .ae-theme 內，:root 上會解析成無效值再被繼承下去。 */
+@theme inline {
+  --color-canvas: rgb(var(--canvas));
+  --color-muted: rgb(var(--muted));
+}
+
+.ae-theme {
+  /* AE 的 brand 是 indigo：在外框內覆寫主系統的 sky。 */
+  --color-brand-50: var(--color-indigo-50);
+  --color-brand-100: var(--color-indigo-100);
+  --color-brand-200: var(--color-indigo-200);
+  --color-brand-300: var(--color-indigo-300);
+  --color-brand-400: var(--color-indigo-400);
+  --color-brand-500: var(--color-indigo-500);
+  --color-brand-600: var(--color-indigo-600);
+  --color-brand-700: var(--color-indigo-700);
+  --color-brand-800: var(--color-indigo-800);
+  --color-brand-900: var(--color-indigo-900);
+
+  /* 系統字型、明列繁中字型：介面切成英文時 lang 變成 en，瀏覽器就不再依 zh-TW 挑中文後備字型，
+     Windows 可能改用微軟雅黑而出現簡體字形。字級下限 12px（tests 把關）。 */
+  --font-sans: ui-sans-serif, system-ui, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-family: var(--font-sans);
+
+  --canvas: 248 250 252;   /* #f8fafc，即 slate-50 */
+  /* 次要文字。slate-600：白底 7.6:1、帶色背景（brand-50 選取列等）仍 ≥ 6.4:1。 */
+  --muted: 71 85 105;      /* slate-600 */
+
+  /* 鍵盤焦點：兩圈相反明度，白底輸入框、brand 實心按鈕、深色卡片上都看得見。 */
+  --fv-inner: #ffffff;
+  --fv-outer: #1e1b4b;     /* indigo-950 */
+}
+.ae-theme.dark {
+  /* 原生繪製的部分（date 輸入的日曆圖示、select 選單、捲軸）只看 color-scheme。 */
+  color-scheme: dark;
+  --canvas: 11 16 32;      /* #0b1020 */
+  /* slate-300：在表頭、選取列這類提亮的深色面板上 ≥ 6.7:1，仍明顯淡於主文字 slate-100。 */
+  --muted: 203 213 225;    /* slate-300 */
+  --fv-inner: #020617;     /* slate-950 */
+  --fv-outer: #c7d2fe;     /* indigo-200 */
+}
+
+.ae-theme :is(a, button, input, select, textarea, summary, [tabindex], [role='button'], [role='checkbox']):focus-visible {
+  /* 透明 outline 在 Windows 高對比模式會被換成系統強制色；沒有它，box-shadow 會被整個丟掉。 */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  /* !important：`focus:shadow-md` 之類的 utility 特異度較高，會把焦點環蓋掉。 */
+  box-shadow: 0 0 0 2px var(--fv-inner), 0 0 0 5px var(--fv-outer) !important;
+}
+@media (forced-colors: active) {
+  .ae-theme :is(a, button, input, select, textarea, summary, [tabindex], [role='button'], [role='checkbox']):focus-visible {
+    outline-color: Highlight;
+    box-shadow: none;
+  }
+}
+
+/* 減少動態效果；.animate-spin 例外：那是「送出中／載入中」，凍住會看起來像當掉（WCAG 2.3.3 只針對非必要動態）。 */
+@media (prefers-reduced-motion: reduce) {
+  .ae-theme *,
+  .ae-theme *::before,
+  .ae-theme *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ae-theme .animate-spin {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

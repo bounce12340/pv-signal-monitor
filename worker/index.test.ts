@@ -146,3 +146,62 @@ describe('routing leaves existing endpoints alone', () => {
     expect(await res.text()).toBe('asset');
   });
 });
+
+describe('LLM proxies are PV-only', () => {
+  // Upstream stand-in: records proxied calls; JWKS lookups still answer with the test key.
+  function upstream(log: string[]) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('cloudflareaccess.com')) return Response.json({ keys: [{ ...jwk, kid: 'test-key' }] });
+      log.push(url);
+      return Response.json({ ok: true });
+    }));
+  }
+  const roleDb = (role: string | null) => ({
+    prepare: () => {
+      const stmt = { bind: () => stmt, first: async () => (role ? { role } : null) };
+      return stmt;
+    },
+  });
+  const chat = (path: string, env: any, headers: Record<string, string>) =>
+    call(path, env, { 'Content-Type': 'application/json', ...headers }, { method: 'POST', body: '{"messages":[]}' });
+
+  it.each(['/llm/chat/completions', '/ollama-cloud/v1/chat/completions'])('proxies %s for a PV listed in AE_PV_EMAILS', async (path) => {
+    const log: string[] = [];
+    upstream(log);
+    const res = await chat(path, baseEnv({ AE_PV_EMAILS: 'pv@example.test', AE_DB: roleDb(null) }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(200);
+    expect(log).toHaveLength(1);
+  });
+
+  it('proxies for a PV recorded in ae_users', async () => {
+    const log: string[] = [];
+    upstream(log);
+    const res = await chat('/llm/chat/completions', baseEnv({ AE_DB: roleDb('pv') }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(200);
+  });
+
+  it.each(['/llm/chat/completions', '/ollama-cloud/v1/chat/completions'])('refuses %s to a rep without reaching upstream', async (path) => {
+    const log: string[] = [];
+    upstream(log);
+    const res = await chat(path, baseEnv({ AE_PV_EMAILS: 'someone-else@example.test', AE_DB: roleDb('rep') }), { 'Cf-Access-Jwt-Assertion': await token({ email: 'rep@example.test' }) });
+    expect(res.status).toBe(403);
+    expect(log).toEqual([]);
+  });
+
+  it('refuses everyone when no PV source is configured (fails closed)', async () => {
+    const log: string[] = [];
+    upstream(log);
+    const res = await chat('/llm/chat/completions', baseEnv(), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(403);
+    expect(log).toEqual([]);
+  });
+
+  it('requires a verified token, not the plain email header', async () => {
+    const log: string[] = [];
+    upstream(log);
+    const res = await chat('/llm/chat/completions', baseEnv({ AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Authenticated-User-Email': 'pv@example.test' });
+    expect(res.status).toBe(401);
+    expect(log).toEqual([]);
+  });
+});
