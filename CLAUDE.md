@@ -21,6 +21,16 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   must NOT be routed through `storage.ts` or added to a `*_KEY_LIST` — doing so would pull it into
   `db.exportAll`'s D1 snapshot, replicate one device's cursor to every other device, and break
   drift detection.
+- **services/ae/** is the frontend side of the AE API: `aeApi.ts` (cases, outbox, `/api/me`),
+  `caseWork.ts` (internal work, workbench, notifications), `aeSubmission.ts` (draft-preservation
+  contract). It always calls the same-origin `/api/ae-reports` (`AE_API_BASE`) — there is no
+  PV-Link-style "local mode" or `VITE_AE_API_ENDPOINT` switch, because a build without that variable
+  would silently keep reps' reports on their own phones. Its outbox/draft (`services/ae/storage.ts`)
+  go through `storage.ts`'s awaitable `saveDurable`/`loadDurable`/`removeDurable`, which reject when
+  nothing could be saved (the outbox contract depends on that; `save()` swallows failures). Those
+  keys are deliberately in **no** `*_KEY_LIST` and not in `db.exportAll`: they are per-device (a
+  replicated outbox would be resubmitted by every device) and hold patient data, which belongs only
+  in `AE_DB`.
 - **worker/index.ts** routes requests. By itself it has no knowledge of PV domain logic — it
   proxies `/llm/*` and `/ollama-cloud/*` to an OpenAI-compatible upstream and persists sync
   snapshots to D1 under `/api/sync*`.
@@ -64,7 +74,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 20 test files / 285 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 25 test files / 340 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 

@@ -12,7 +12,7 @@
 | PR | 內容 | 狀態 |
 |---|---|---|
 | 1 | Worker：Access JWT 驗證、`/api/ae-reports*`、`/api/me`、AE_DB／AE_FILES 綁定 | [#1](https://github.com/bounce12340/pv-signal-monitor/pull/1) |
-| 2 | 服務層：`aeApi`、`aeSubmission`、`caseWork`、`taipeiTime`、CIOMS 匯出 | 待做 |
+| 2 | 服務層：`aeApi`、`aeSubmission`、`caseWork`、`taipeiTime`（CIOMS 匯出已在 `services/literature/cioms.ts`，內容相同） | 進行中 |
 | 3 | 業務手機通報 `#/report`、角色分流、`/llm/*` 限 pv | 待做 |
 | 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | 待做 |
 | 5 | 切換上線（使用者操作，見下方清單） | 待做 |
@@ -29,6 +29,18 @@
 
 PR 1 暫時拿掉兩段依賴 i18n 的測試，搬 i18n 時要加回：PV-Link `tests/aeReport.test.ts` 的「i18n 動態鍵覆蓋率」，
 與 `tests/caseWork.test.ts` 的雙語鍵完整性。
+
+## PR 2 做了什麼
+
+服務層搬到 `services/ae/`（`aeApi.ts`、`aeSubmission.ts`、`caseWork.ts`、`taipeiTime.ts`），與 PV-Link 的刻意差異：
+
+- **沒有本機模式**：一律走同源 `/api/ae-reports`。PV-Link 以 `VITE_AE_API_ENDPOINT` 切換遠端／本機，
+  本 repo 的 CI 部署不帶這個變數，照搬會讓正式站靜默跑在本機模式。`caseWork.ts` 直接開 IndexedDB 的展示模式一併拿掉。
+  PR 3／4 搬元件時，`hasRemoteEndpoint()`、`local` / `local_saved` 相關的分支要跟著刪。
+- **不送 `X-PV-Token`**：這裡的 Worker 不檢查它，前端也不放憑證。
+- **outbox／草稿**經 `services/ae/storage.ts` → `storage.ts` 新增的 `saveDurable`／`loadDurable`／`removeDurable`
+  （寫不進去會拋錯），且刻意不列入 `*_KEY_LIST`、不進 D1 同步快照（見 `CLAUDE.md`）。
+- CIOMS 匯出不用搬：`services/literature/cioms.ts` 與 PV-Link `services/cioms.ts` 內容相同。
 
 ## PR 2–4 要搬的檔案（PV-Link 路徑）
 
@@ -60,8 +72,10 @@ PR 1 暫時拿掉兩段依賴 i18n 的測試，搬 i18n 時要加回：PV-Link `
 2. 確認 PR 3 的 `/llm/*` 角色限制已部署——之後才能把業務加進 Access，否則業務可用公司的 LLM 額度。
 3. pv.uic-ai.com 的 Access policy 加入業務：**逐一列出個人公司信箱**，不可用 `@domain` 或 `@gmail.com` 規則。
 4. 依 PV-Link `docs/uat-demo-case.md` 送一筆虛擬測試個案，在 pv.uic-ai.com 驗收：稽核軌跡操作者為驗證過的信箱。
-5. `pvlink.uic-ai.com` 轉址到 `pv.uic-ai.com/#/report`。
-6. 撤除 PV-Link 的 Pages 專案——同時解決 `pv-link-auditor.pages.dev` 未受 Access 保護的缺口。
+5. 轉址前請業務打開 PV-Link，確認沒有「N 筆待補送」的提示：outbox 存在各自手機瀏覽器的 pvlink.uic-ai.com 網域底下，
+   不會跟著搬到 pv.uic-ai.com，轉址後就補送不了。
+6. `pvlink.uic-ai.com` 轉址到 `pv.uic-ai.com/#/report`。
+7. 撤除 PV-Link 的 Pages 專案——同時解決 `pv-link-auditor.pages.dev` 未受 Access 保護的缺口。
 
 ## 不可違反的條件
 
