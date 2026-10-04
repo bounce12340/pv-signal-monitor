@@ -222,7 +222,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
         <button
           onClick={handleRun}
           disabled={isProcessing}
-          className="mt-6 w-full py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium shadow-lg shadow-brand-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="mt-6 w-full py-3 bg-primary hover:bg-primary-hover text-white rounded-lg font-medium shadow-lg shadow-brand-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
           {isProcessing ? '執行中...' : '執行檢索與 AI 評分'}

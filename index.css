@@ -14,6 +14,14 @@
   --color-brand-900: #0c4a6e;
 }
 
+/* 實心主要按鈕／選取中分頁的底色（配白字）。brand-600 配白字只有 4.10:1，不到 WCAG 4.5:1；
+   brand-700 是 5.93:1、hover 的 brand-800 是 7.56:1。要調整主按鈕深淺只改這裡，不必逐一改呼叫端。
+   inline：讓 var 在元素本身解析，AE 外框內會跟著它的 indigo brand 走。 */
+@theme inline {
+  --color-primary: var(--color-brand-700);
+  --color-primary-hover: var(--color-brand-800);
+}
+
 /* ══ AE 畫面（業務通報、建檔；之後的後台收案）══════════════════════════════════
    從 PV-Link 搬來的 AE 元件以語意色名寫 class（brand／danger／caution／success、canvas、muted），
    亮暗色與對比都在 PV-Link 實測過。主系統的 brand 是 sky、AE 的是 indigo，而 sky-600 白底對比

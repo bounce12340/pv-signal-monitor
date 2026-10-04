@@ -299,7 +299,7 @@ export const GeneratorMode = React.memo(({
                     <button
                       onClick={runBatch}
                       disabled={batchRunning || batchQueue.every(b => b.status === 'done')}
-                      className="text-xs px-3 py-1 rounded font-medium bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1"
+                      className="text-xs px-3 py-1 rounded font-medium bg-primary text-white hover:bg-primary-hover disabled:opacity-50 flex items-center gap-1"
                     >
                       {batchRunning && <Loader2 size={12} className="animate-spin" />}
                       {batchRunning ? '解析中...' : batchQueue.some(b => b.status === 'error') ? '重試失敗項目' : '開始批次解析'}
@@ -343,7 +343,7 @@ export const GeneratorMode = React.memo(({
             <button
               onClick={handleProcess}
               disabled={loading}
-              className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium shadow-lg shadow-brand-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-3 bg-primary hover:bg-primary-hover text-white rounded-lg font-medium shadow-lg shadow-brand-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Database size={18} />}
               {loading ? 'AI 解析中...' : '產生 AE Master'}
@@ -370,7 +370,7 @@ export const GeneratorMode = React.memo(({
                     <button 
                       onClick={handleSaveToDb}
                       disabled={saveStatus === 'saved'}
-                      className={`px-3 py-1 text-xs rounded font-medium flex items-center gap-1 transition-colors ${saveStatus === 'saved' ? 'bg-green-100 text-green-700' : 'bg-brand-600 text-white hover:bg-brand-700'}`}
+                      className={`px-3 py-1 text-xs rounded font-medium flex items-center gap-1 transition-colors ${saveStatus === 'saved' ? 'bg-green-100 text-green-700' : 'bg-primary text-white hover:bg-primary-hover'}`}
                     >
                       {saveStatus === 'saved' ? <Check size={14}/> : <Save size={14}/>}
                       {saveStatus === 'saved' ? '已儲存' : (currentExtractionProductId ? '儲存更新' : '存入資料庫')}
