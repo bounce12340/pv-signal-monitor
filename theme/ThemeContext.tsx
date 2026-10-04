@@ -18,12 +18,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 export const useTheme = () => useContext(ThemeContext);
 
-/** AE 畫面的外框：套用 AE 的樣式範圍、目前主題與語言。 */
-export const AEScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+/**
+ * AE 畫面的外框：套用 AE 的樣式範圍、目前主題與語言。
+ * embedded：嵌在主系統頁面裡（後台收案）時不佔滿整個視窗高度。
+ */
+export const AEScope: React.FC<{ children: React.ReactNode; embedded?: boolean }> = ({ children, embedded = false }) => {
   const { theme } = useTheme();
   const { lang } = useLang();
+  const size = embedded ? 'rounded-3xl overflow-hidden' : 'min-h-[100dvh]';
   return (
-    <div lang={langTag(lang)} className={`ae-theme${theme === 'dark' ? ' dark' : ''} min-h-[100dvh] bg-canvas text-slate-900 dark:text-slate-100`}>
+    <div lang={langTag(lang)} className={`ae-theme${theme === 'dark' ? ' dark' : ''} ${size} bg-canvas text-slate-900 dark:text-slate-100`}>
       {children}
     </div>
   );

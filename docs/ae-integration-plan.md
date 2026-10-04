@@ -16,8 +16,8 @@
 | 1 | Worker：Access JWT 驗證、`/api/ae-reports*`、`/api/me`、AE_DB／AE_FILES 綁定 | [#1](https://github.com/bounce12340/pv-signal-monitor/pull/1) |
 | 2 | 服務層：`aeApi`、`aeSubmission`、`caseWork`、`taipeiTime`（CIOMS 匯出已在 `services/literature/cioms.ts`，內容相同） | [#3](https://github.com/bounce12340/pv-signal-monitor/pull/3) |
 | 3 | 業務手機通報 `#/report`、角色分流、`/llm/*` 限 pv | [#4](https://github.com/bounce12340/pv-signal-monitor/pull/4) |
-| 3a | 個案編號改由 Worker 配發 | 進行中 |
-| 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | 待做 |
+| 3a | 個案編號改由 Worker 配發 | [#5](https://github.com/bounce12340/pv-signal-monitor/pull/5) |
+| 4 | 後台收案、內部工作台；修「新個案無法建立第一筆工作」 | 進行中 |
 | 5 | 切換上線（使用者操作，見下方清單） | 待做 |
 
 ## PR 1 做了什麼
@@ -59,6 +59,21 @@ PR 1 暫時拿掉兩段依賴 i18n 的測試，搬 i18n 時要加回：PV-Link `
   ⚠️ 部署本 PR 前必須先設好 `AE_PV_EMAILS`（或 `ae_users` 已有 pv 紀錄），否則所有人的 AI 功能都會被擋（403）。
   `wrangler dev` 要在 `.dev.vars` 設 `AE_PV_EMAILS=dev@local`。
 - PR 1 拿掉的「i18n 動態鍵覆蓋率」測試已加回（`i18n/translations.test.ts`）；caseWork 雙語鍵完整性等 PR 4 搬 `i18n/work.ts` 時加回。
+
+## PR 4 做了什麼
+
+- 主系統導覽列新增「通報收案」（`App.tsx` 的 `aeIntake` 模式）→ `components/ae/AEIntakePage.tsx`：
+  載入、儲存、刪除個案、視窗取回焦點時重讀；讀取失敗顯示錯誤而不是空的收件匣。畫面包在 `AEScope embedded` 裡。
+- `components/ae/AEIntakeConsole.tsx`（七道關卡的收案處理台）、`CaseWorkBoard.tsx`（內部工作台）、`caseAudit.ts`；
+  `i18n/work.ts`。收件匣上已有「開啟業務通報表單」與「複製連結」按鈕，PV 同仁從這裡進 `#/report`。
+- 拿掉本機模式：工作台不再逐筆讀本機 IndexedDB，刪除一律軟刪除並要求理由；本機試用的提示字串一併刪除（有測試擋）。
+- **修正「新個案無法建立第一筆內部工作」**：個案頁新增「內部工作」按鈕，直接打開該個案的工作編輯器
+  （`CaseWorkBoard` 的 `openRequest`）。Worker 對沒有工作紀錄的個案回空白工作（version 0），存下去就是第一筆。
+  編輯器有未儲存內容時，不會被這個按鈕蓋掉。
+- 後台建立追蹤報告後，畫面顯示 Worker 配發的編號（`<母案>-F<n>`），不是前端自己算的。
+- PR 1 拿掉的 caseWork 雙語鍵完整性測試已加回（`i18n/translations.test.ts`）。
+- **沒搬的**：PV-Link 把 AE 個案併入文獻的「成分 × PT 訊號聚合」（`aeToSignalRecords`）。本 repo 的訊號聚合是另一套，
+  要不要合併、怎麼合併需要另外決定。
 
 ## PR 2–4 要搬的檔案（PV-Link 路徑）
 
@@ -105,9 +120,8 @@ PV-Link 在前端以「看得到的個案」配號，但手機看不到別人的
 **`/api/sync` 沒有角色限制。** 業務加進 Access 後，可以直接呼叫 API 在同步用的 `DB` 存一份自己的快照
 （只限自己的信箱，讀不到別人的）。風險低，但切換上線前宜一併限制為 PV。
 
-**新個案無法建立第一筆內部工作（PR 4 修）。** 正式環境的內部工作台只列出「指派給自己、且內部到期日落在所選範圍」的工作（`worker/ae/work.js` 的 workbench 查詢），
-而工作編輯器只能從列表開啟；新個案沒有工作紀錄，因此無法從介面建立第一筆工作。
-建議：在個案頁加「內部工作」按鈕，直接開啟該個案的工作編輯器。
+**新個案無法建立第一筆內部工作——PR 4 已修。** 內部工作台只列出「指派給自己、且內部到期日落在所選範圍」的工作
+（`worker/ae/work.js` 的 workbench 查詢），編輯器原本只能從列表開啟。現在個案頁有「內部工作」按鈕可直接開啟。
 
 ## 切換上線清單（PR 5，使用者操作）
 

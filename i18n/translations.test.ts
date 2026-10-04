@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { translations, TransKey } from './translations';
+import { workZh, workEn } from './work';
 import { AE_ISSUE_CODES, AE_CASE_STATUSES, AE_DUPLICATE_REASONS, CLOCK_BASES } from '../services/ae/aeReport';
 
 describe('AE translations', () => {
@@ -18,6 +19,8 @@ describe('AE translations', () => {
   });
   it('carries no leftover strings for the removed local mode', () => {
     expect(Object.keys(translations.zh).filter(k => /local/i.test(k))).toEqual([]);
+    expect(Object.entries(translations.zh).filter(([, v]) => /本機試用|本機模式|本機個案/.test(v))).toEqual([]);
+    expect(Object.entries(translations.en).filter(([, v]) => /\bdemo\b|local (mode|case)/i.test(v))).toEqual([]);
   });
 });
 
@@ -32,6 +35,15 @@ describe('dynamic key coverage', () => {
     ['ae.console.basis', CLOCK_BASES],
   ] as const)('every %s.<value> has zh and en text', (prefix, values) => {
     expect(values.filter(v => !has(`${prefix}.${v}`))).toEqual([]);
+  });
+});
+
+// PV-Link tests/caseWork.test.ts 的雙語鍵完整性，PR #1 搬後端時因為還沒有 i18n 而暫時拿掉。
+describe('work board strings', () => {
+  it('have complete, non-empty bilingual keys and are part of the AE translations', () => {
+    expect(Object.keys(workEn).sort()).toEqual(Object.keys(workZh).sort());
+    expect(Object.values(workZh).every(Boolean) && Object.values(workEn).every(Boolean)).toBe(true);
+    for (const k of Object.keys(workZh)) expect(translations.en[k as TransKey]).toBe((workEn as any)[k]);
   });
 });
 

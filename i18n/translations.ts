@@ -1,11 +1,18 @@
 // AE 畫面（業務通報、建檔，之後的後台收案）的中英雙語字串。從 PV-Link 的 i18n/translations.ts
-// 只取 AE 用到的鍵（ae.*、app.loading、header.themeToggle），鍵名保持不變，方便後續搬元件。
+// 只取 AE 用到的鍵（ae.*、work.*，以及後台沿用的 app.loading、header.themeToggle、幾個 common.*／review.*），鍵名保持不變。
 // 主系統其餘畫面仍是單語中文，不經過這裡。
 import type { UiLang } from '../services/ae/prefs';
+import { workZh, workEn } from './work';
 
 export type Lang = UiLang;
 
 const zh = {
+  ...workZh,
+  'common.copied': '已複製!',
+  'common.dictVerified': '詞典校驗',
+  'review.copyFullText': '複製全文',
+  'review.downloadTxt': '下載 .txt',
+  'review.socNotInDict': '種子詞典未收錄',
   'app.loading': '載入中，請稍候',
   'header.themeToggle': '切換主題',
   'ae.mobile.title': '藥品不良反應通報',
@@ -209,7 +216,6 @@ const zh = {
   'ae.console.ciomsTitle': 'CIOMS-I 個案安全報告草稿',
   'ae.console.ciomsNotice': '由通報欄位離線映射產生，需藥安人員審閱補全後方可送件',
   'ae.console.deleteCase': '刪除個案',
-  'ae.console.deleteConfirm': '確定刪除此個案？此操作無法復原，且會一併移除稽核軌跡。',
   'ae.console.deleteConfirmRemote': '確定刪除此個案？後端採軟刪除：個案會從清單移除，但資料與稽核軌跡仍保留於資料庫。',
   'ae.console.deleteReason': '請輸入刪除理由（會寫入稽核軌跡）：',
   'ae.console.day0': '首次獲知日 (Day 0)',
@@ -287,6 +293,12 @@ const zh = {
   'ae.issue.countryOtherRequired': '已選「其他」，請填寫國名',
   'ae.console.foreignCase': '境外個案',
   'ae.console.createFollowUp': '建立追蹤報告',
+  'ae.page.loadFailed': '讀取個案庫失敗',
+  'ae.page.saveFailed': '個案儲存失敗，畫面未更新，請重試',
+  'ae.page.deleteFailed': '個案刪除失敗',
+  'ae.page.retry': '重新讀取',
+  'ae.console.openWork': '內部工作',
+  'ae.console.openWorkHint': '開啟這個個案的內部工作：指派、內部到期日、補件與聯絡紀錄。新個案要從這裡建立第一筆。',
   'ae.console.createFollowUpHint': '複製本案內容為一份新的追蹤報告，Day 0 設為今天（獲知新資訊日）',
   'ae.console.followUpChain': '追蹤報告鏈',
   'ae.console.parentCase': '原始報告',
@@ -303,6 +315,12 @@ const zh = {
 export type TransKey = keyof typeof zh;
 
 const en: Record<TransKey, string> = {
+  ...workEn,
+  'common.copied': 'Copied!',
+  'common.dictVerified': 'Dictionary Verified',
+  'review.copyFullText': 'Copy Full Text',
+  'review.downloadTxt': 'Download .txt',
+  'review.socNotInDict': 'Not in seed dictionary',
   'app.loading': 'Loading, please wait',
   'header.themeToggle': 'Toggle Theme',
   'ae.mobile.title': 'Adverse Reaction Report',
@@ -506,7 +524,6 @@ const en: Record<TransKey, string> = {
   'ae.console.ciomsTitle': 'CIOMS-I Case Safety Report Draft',
   'ae.console.ciomsNotice': 'Mapped offline from the reported fields — PV staff must review and complete before submission',
   'ae.console.deleteCase': 'Delete case',
-  'ae.console.deleteConfirm': 'Delete this case? This cannot be undone and removes the audit trail with it.',
   'ae.console.deleteConfirmRemote': 'Delete this case? The backend soft-deletes: the case leaves the list but its data and audit trail remain in the database.',
   'ae.console.deleteReason': 'Reason for deletion (recorded in the audit trail):',
   'ae.console.day0': 'First awareness (Day 0)',
@@ -584,6 +601,12 @@ const en: Record<TransKey, string> = {
   'ae.issue.countryOtherRequired': '"Other" selected — please name the country',
   'ae.console.foreignCase': 'Foreign case',
   'ae.console.createFollowUp': 'Create follow-up',
+  'ae.page.loadFailed': 'Could not load the case database',
+  'ae.page.saveFailed': 'Case not saved; the screen was not updated. Please retry',
+  'ae.page.deleteFailed': 'Case not deleted',
+  'ae.page.retry': 'Reload',
+  'ae.console.openWork': 'Internal work',
+  'ae.console.openWorkHint': 'Open this case’s internal work: assignee, internal due date, requests and contacts. A new case gets its first work item here.',
   'ae.console.createFollowUpHint': 'Copy this case into a new follow-up report, with Day 0 set to today (the date the new information was received)',
   'ae.console.followUpChain': 'Follow-up chain',
   'ae.console.parentCase': 'Initial report',

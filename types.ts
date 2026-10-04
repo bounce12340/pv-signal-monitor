@@ -8,7 +8,8 @@ export type AppMode =
   | 'audit'
   | 'litSearch'
   | 'litReview'
-  | 'litLibrary';
+  | 'litLibrary'
+  | 'aeIntake';
 
 // Shape of an AI extraction result / editable master, before it is
 // flattened into LabelAeMaster rows by db.saveExtractedMaster.

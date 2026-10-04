@@ -32,10 +32,12 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   replicated outbox would be resubmitted by every device) and hold patient data, which belongs only
   in `AE_DB`.
 - **components/ae/** (+ `i18n/`, `theme/`) are the AE screens: `Root.tsx` asks `/api/me` for the role and
-  routes reps (any hash) and `#/report` to `AEReportMobile`, everyone else to `App`. Only AE screens are
+  routes reps (any hash) and `#/report` to `AEReportMobile`, everyone else to `App`, whose 「通報收案」 mode
+  renders `AEIntakePage` (loads/saves cases via `services/ae/aeApi`) → `AEIntakeConsole` + `CaseWorkBoard`
+  inside `<AEScope embedded>`. Only AE screens are
   wrapped in `AEScope` (`.ae-theme` in `index.css`): their semantic colours, indigo brand, fonts, focus
-  ring, reduced-motion and class-based dark mode are scoped to that wrapper so the host app is pixel-for-
-  pixel unchanged — never add an unscoped rule to the AE section of `index.css` (a test enforces it).
+  ring, reduced-motion and class-based dark mode are scoped to that wrapper so the host app's own styling is
+  untouched — never add an unscoped rule to the AE section of `index.css` (a test enforces it).
   Their language/theme prefs go through `services/ae/prefs.ts` (hydrated at boot via
   `AE_PREFS_KEY_LIST`, deliberately not in `db.exportAll`).
 - **worker/index.ts** routes requests. By itself it has no knowledge of PV domain logic — it
@@ -89,7 +91,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 32 test files / 417 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 34 test files / 447 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
