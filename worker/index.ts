@@ -5,18 +5,19 @@
 // endpoints backed by D1 for cross-device data sync.
 //
 // It also hosts the adverse-event (AE) case API ported from PV-Link
-// (/api/ae-reports*, /api/me — see worker/ae/). Unlike /api/sync, that API
-// identifies the caller only from a *verified* Access JWT (worker/accessJwt.ts):
-// its actor goes into an append-only audit trail, so it must not rest on a
-// header that is merely expected to have been set upstream.
+// (/api/ae-reports*, /api/me — see worker/ae/).
 //
-// Identity for /api/* comes from the Cf-Access-Authenticated-User-Email
-// header that Cloudflare Access injects after login. The only route to this
-// Worker is the custom domain in wrangler.jsonc, which sits entirely behind
-// Access (workers.dev is off), so a request without that header is not a
-// legitimate one. The /llm and /ollama-cloud routes additionally require the
-// PV role (see llmGate): reps get into Access to file AE reports, and must not
-// be able to spend the OLLAMA_API_KEY those routes inject.
+// Every caller is identified only from a *verified* Access JWT
+// (worker/accessJwt.ts), never from a header that is merely expected to have
+// been set upstream: the AE actor goes into an append-only audit trail, and
+// the sync snapshot is keyed by it. The only route to this Worker is the
+// custom domain in wrangler.jsonc, which sits entirely behind Access
+// (workers.dev is off).
+//
+// Everything except the AE API and static assets is PV-only (see pvGate):
+// reps get into Access to file AE reports, and must neither spend the
+// OLLAMA_API_KEY that /llm and /ollama-cloud inject nor store snapshots in
+// the sync database, which exists only for the PV app.
 
 import { verifyAccessJwt, AccessPayload } from './accessJwt';
 // Ported verbatim from PV-Link (plain JS, already covered by its own tests).
@@ -98,14 +99,6 @@ const json = (body: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-function identity(request: Request, env: Env): string | null {
-  const email = request.headers.get('Cf-Access-Authenticated-User-Email');
-  if (email) return email;
-  // wrangler dev runs without Access in front; never reachable in production.
-  if (env.DEV_MODE === 'true') return 'dev@local';
-  return null;
-}
-
 const isAePath = (pathname: string) => {
   const path = pathname.replace(/\/+$/, '');
   return path === '/api/me' || path === '/api/ae-reports' || path.startsWith('/api/ae-reports/');
@@ -148,23 +141,26 @@ async function handleAe(request: Request, env: Env, url: URL): Promise<Response>
 }
 
 /**
- * PV-only gate for the LLM proxies, or the Response to send instead. Reps are
- * let into Access to file AE reports; without this they could spend the
- * company's OLLAMA_API_KEY. Same verified identity and role source as the AE
- * API (AE_PV_EMAILS secret, then ae_users.role), and it fails closed: anyone
- * not listed as PV — everyone, if neither source is configured or AE_DB is
- * unbound — gets a 403.
+ * PV-only gate for the LLM proxies and /api/sync: the caller's verified email,
+ * or the Response to send instead. Reps are let into Access to file AE
+ * reports; without this they could spend the company's OLLAMA_API_KEY and
+ * store snapshots in the sync database. Same verified identity and role source
+ * as the AE API (AE_PV_EMAILS secret, then ae_users.role), and it fails
+ * closed: anyone not listed as PV — everyone, if neither source is configured
+ * or AE_DB is unbound — gets a 403, as does a token without an email.
  */
-async function llmGate(request: Request, env: Env): Promise<Response | null> {
+async function pvGate(request: Request, env: Env): Promise<string | Response> {
   const identity = await aeIdentity(request, env);
   if (identity instanceof Response) return identity;
+  const forbidden = json({ error: 'forbidden: requires PV role' }, 403);
+  if (!identity.email) return forbidden;
   const role = await resolveRole({ DB: env.AE_DB, AE_PV_EMAILS: env.AE_PV_EMAILS }, identity.email);
-  return role === 'pv' ? null : json({ error: 'forbidden: requires PV role' }, 403);
+  return role === 'pv' ? identity.email : forbidden;
 }
 
 async function handleSync(request: Request, env: Env, url: URL): Promise<Response> {
-  const email = identity(request, env);
-  if (!email) return json({ error: 'unauthenticated' }, 401);
+  const email = await pvGate(request, env);
+  if (email instanceof Response) return email;
 
   if (request.method === 'GET' && url.pathname === '/api/sync/latest') {
     const row = await env.DB
@@ -251,8 +247,8 @@ async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute)
   if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
-  const denied = await llmGate(request, env);
-  if (denied) return denied;
+  const caller = await pvGate(request, env);
+  if (caller instanceof Response) return caller;
   const upstreamPath = url.pathname.slice(route.prefix.length);
   if (route.requireUpstreamPrefix && !ALLOWED_UPSTREAM_PREFIXES.some((p) => upstreamPath.startsWith(p))) {
     return new Response('Not found', { status: 404 });
