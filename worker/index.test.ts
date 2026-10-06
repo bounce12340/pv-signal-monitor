@@ -82,7 +82,7 @@ describe('AE API authentication boundary', () => {
     expect(res.status).toBe(401);
   });
 
-  it('does not accept the plain email header that /api/sync trusts', async () => {
+  it('does not accept the plain Access email header', async () => {
     const res = await call('/api/ae-reports', baseEnv({ AE_DB: fakeDb('ae', []) }), { 'Cf-Access-Authenticated-User-Email': 'pv@example.test' });
     expect(res.status).toBe(401);
   });
@@ -127,16 +127,16 @@ describe('AE API bindings', () => {
 });
 
 describe('routing leaves existing endpoints alone', () => {
-  it('still serves /api/sync from the snapshots database with the Access email header', async () => {
+  it('still serves /api/sync from the snapshots database', async () => {
     const log: string[] = [];
-    const res = await call('/api/sync/latest', baseEnv({ DB: fakeDb('snapshots', log), AE_DB: fakeDb('ae', log) }), { 'Cf-Access-Authenticated-User-Email': 'a@example.test' });
+    const res = await call('/api/sync/latest', baseEnv({ DB: fakeDb('snapshots', log), AE_DB: fakeDb('ae', log), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Jwt-Assertion': await token() });
     expect(res.status).toBe(200);
-    expect(log.every(l => l.startsWith('snapshots'))).toBe(true);
+    expect(log.some(l => l.startsWith('snapshots'))).toBe(true);
   });
 
   it('does not route look-alike paths to the AE API', async () => {
     const log: string[] = [];
-    const res = await call('/api/ae-reportsX', baseEnv({ DB: fakeDb('snapshots', log), AE_DB: fakeDb('ae', log) }), { 'Cf-Access-Authenticated-User-Email': 'a@example.test' });
+    const res = await call('/api/ae-reportsX', baseEnv({ DB: fakeDb('snapshots', log), AE_DB: fakeDb('ae', log), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Jwt-Assertion': await token() });
     expect(res.status).toBe(404);
     expect(log.filter(l => l.startsWith('ae'))).toEqual([]);
   });
@@ -203,5 +203,91 @@ describe('LLM proxies are PV-only', () => {
     const res = await chat('/llm/chat/completions', baseEnv({ AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Authenticated-User-Email': 'pv@example.test' });
     expect(res.status).toBe(401);
     expect(log).toEqual([]);
+  });
+});
+
+describe('/api/sync is PV-only', () => {
+  // Snapshots stand-in that records the bound user_email of every query, so a
+  // test can prove whose snapshot was read or written — and that a refused
+  // caller never reached the database at all.
+  function snapshotsDb(bound: unknown[][]) {
+    return {
+      prepare: () => {
+        const stmt = {
+          bind: (...values: unknown[]) => { bound.push(values); return stmt; },
+          first: async () => null,
+          run: async () => ({ meta: { changes: 1 } }),
+        };
+        return stmt;
+      },
+    };
+  }
+  const roleDb = (role: string | null) => ({
+    prepare: () => {
+      const stmt = { bind: () => stmt, first: async () => (role ? { role } : null) };
+      return stmt;
+    },
+  });
+  const put = (env: any, headers: Record<string, string>) =>
+    call('/api/sync', env, { 'Content-Type': 'application/json', ...headers }, {
+      method: 'PUT', body: JSON.stringify({ device: 'test', data: { schema: 'pv-signal-monitor-backup' } }),
+    });
+
+  it('serves a PV listed in AE_PV_EMAILS, keyed by the verified email', async () => {
+    const bound: unknown[][] = [];
+    const res = await call('/api/sync/latest', baseEnv({ DB: snapshotsDb(bound), AE_DB: roleDb(null), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(200);
+    expect(bound).toEqual([['pv@example.test']]);
+  });
+
+  it('serves a PV recorded in ae_users', async () => {
+    const bound: unknown[][] = [];
+    const res = await put(baseEnv({ DB: snapshotsDb(bound), AE_DB: roleDb('pv') }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(200);
+    expect(bound.length).toBeGreaterThan(0);
+    expect(bound.every(values => values[0] === 'pv@example.test')).toBe(true);
+  });
+
+  it.each([
+    ['GET', '/api/sync/latest'],
+    ['GET', '/api/sync/data'],
+    ['PUT', '/api/sync'],
+  ])('refuses %s %s to a rep without touching the snapshots database', async (method, path) => {
+    const bound: unknown[][] = [];
+    const env = baseEnv({ DB: snapshotsDb(bound), AE_DB: roleDb('rep'), AE_PV_EMAILS: 'someone-else@example.test' });
+    const headers = { 'Cf-Access-Jwt-Assertion': await token({ email: 'rep@example.test' }) };
+    const res = method === 'PUT' ? await put(env, headers) : await call(path, env, headers);
+    expect(res.status).toBe(403);
+    expect(bound).toEqual([]);
+  });
+
+  it('refuses everyone when no PV source is configured (fails closed)', async () => {
+    const bound: unknown[][] = [];
+    const res = await put(baseEnv({ DB: snapshotsDb(bound) }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(403);
+    expect(bound).toEqual([]);
+  });
+
+  it('refuses a verified token that carries no email', async () => {
+    const bound: unknown[][] = [];
+    const res = await call('/api/sync/latest', baseEnv({ DB: snapshotsDb(bound), AE_DB: roleDb('pv'), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Jwt-Assertion': await token({ email: undefined }) });
+    expect(res.status).toBe(403);
+    expect(bound).toEqual([]);
+  });
+
+  it('no longer trusts the plain Access email header', async () => {
+    const bound: unknown[][] = [];
+    const res = await call('/api/sync/latest', baseEnv({ DB: snapshotsDb(bound), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Authenticated-User-Email': 'pv@example.test' });
+    expect(res.status).toBe(401);
+    expect(bound).toEqual([]);
+  });
+
+  it('keeps the wrangler dev shortcut, but only for a dev identity listed as PV', async () => {
+    const bound: unknown[][] = [];
+    const dev = { DB: snapshotsDb(bound), ACCESS_TEAM_DOMAIN: undefined, ACCESS_AUD: undefined, DEV_MODE: 'true' };
+    expect((await call('/api/sync/latest', baseEnv(dev))).status).toBe(403);
+    expect(bound).toEqual([]);
+    expect((await call('/api/sync/latest', baseEnv({ ...dev, AE_PV_EMAILS: 'dev@local' }))).status).toBe(200);
+    expect(bound).toEqual([['dev@local']]);
   });
 });

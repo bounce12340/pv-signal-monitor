@@ -42,9 +42,10 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   `AE_PREFS_KEY_LIST`, deliberately not in `db.exportAll`).
 - **worker/index.ts** routes requests. By itself it has no knowledge of PV domain logic — it
   proxies `/llm/*` and `/ollama-cloud/*` to an OpenAI-compatible upstream and persists sync
-  snapshots to D1 under `/api/sync*`. The LLM proxies are **PV-only** (`llmGate`: verified Access JWT +
-  the AE role from `AE_PV_EMAILS`/`ae_users`, fail closed), because reps get into Access to file AE
-  reports and must not spend `OLLAMA_API_KEY`.
+  snapshots to D1 under `/api/sync*`. The LLM proxies and `/api/sync*` are **PV-only** (`pvGate`:
+  verified Access JWT + the AE role from `AE_PV_EMAILS`/`ae_users`, fail closed), because reps get into
+  Access to file AE reports and must neither spend `OLLAMA_API_KEY` nor store snapshots in `DB`. The
+  snapshot is keyed by the verified JWT email.
 - **worker/ae/** is the adverse-event (AE) case API (`/api/ae-reports*`, `/api/me`), ported from PV-Link
   (plain JS; `services/ae/caseWorkModel.js` is shared with it; since changed: server-side case numbering,
   `resolveRole` exported for the LLM gate). `worker/index.ts` only
@@ -68,9 +69,9 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   in-memory cache hydrated at boot (`index.tsx` → `initStorage`). Don't add new persisted keys
   without adding them to the relevant `*_KEY_LIST` export, or they won't be hydrated, migrated, or
   captured in the D1 sync snapshot (`db.exportAll`/`importAll`, schema `pv-signal-monitor-backup`).
-- AE API identity comes **only** from a verified Access JWT (`worker/accessJwt.ts`: signature, `iss`,
-  `aud`, `exp`, pinned RS256) — not from the `Cf-Access-Authenticated-User-Email` header `/api/sync`
-  uses. The actor is written into an append-only audit trail (`ae_audit`, guarded by DB triggers), so
+- Worker identity (AE API, LLM proxies, `/api/sync`) comes **only** from a verified Access JWT
+  (`worker/accessJwt.ts`: signature, `iss`, `aud`, `exp`, pinned RS256) — never from the
+  `Cf-Access-Authenticated-User-Email` header. The AE actor is written into an append-only audit trail (`ae_audit`, guarded by DB triggers), so
   no request content may ever choose it. Half-configured Access (`ACCESS_TEAM_DOMAIN` without
   `ACCESS_AUD` or vice versa) is a 503, a missing/invalid token a 401.
 - AE roles are enforced in `worker/ae/ae.js`, not in the UI: anyone not listed as PV (`AE_PV_EMAILS`
@@ -91,7 +92,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 34 test files / 447 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 34 test files / 456 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
@@ -105,6 +106,6 @@ upstream for `/llm/*`; the app itself never reads a `.env` file.
 The AE case API additionally binds the existing PV-Link D1 database `pv-link-ae` (`AE_DB`) and R2
 bucket `pv-link-ae-attachments` (`AE_FILES`), verifies Access JWTs against `ACCESS_TEAM_DOMAIN` /
 `ACCESS_AUD` (the AUD tag of the pv.uic-ai.com Access application), and needs the `AE_PV_EMAILS`
-secret before anyone is treated as PV staff — and since the LLM proxies are PV-only, before
-deploying, or every user's AI features return 403. For `wrangler dev`, put `AE_PV_EMAILS=dev@local` in
-`.dev.vars`.
+secret before anyone is treated as PV staff — and since the LLM proxies and sync are PV-only, before
+deploying, or every user's AI features and cloud sync return 403. For `wrangler dev`, put
+`AE_PV_EMAILS=dev@local` in `.dev.vars`.

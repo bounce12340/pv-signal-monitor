@@ -55,7 +55,7 @@ PR 1 暫時拿掉兩段依賴 i18n 的測試，搬 i18n 時要加回：PV-Link `
 - **語言／主題偏好**經 `services/ae/prefs.ts` → `storage.ts`，開機時 hydrate，不進 D1 同步快照。
 - **角色分流與 PV-Link 的差異**：建檔關卡只擋要進通報表單的人（PV 用主系統不必先建檔）；`/api/me` 失敗時直接給通報表單
   （PV-Link 會卡在存不了的建檔畫面）；`vite` 開發伺服器沒有 Worker，失敗時當成 PV（正式 build 不含這個分支）。
-- **`/llm/*`、`/ollama-cloud/*` 只放行 PV**（`worker/index.ts` 的 `llmGate`，角色來源與 AE API 相同），fail closed。
+- **`/llm/*`、`/ollama-cloud/*` 只放行 PV**（`worker/index.ts` 的 `llmGate`，現已改名 `pvGate` 並同時用於 `/api/sync*`，角色來源與 AE API 相同），fail closed。
   ⚠️ 部署本 PR 前必須先設好 `AE_PV_EMAILS`（或 `ae_users` 已有 pv 紀錄），否則所有人的 AI 功能都會被擋（403）。
   `wrangler dev` 要在 `.dev.vars` 設 `AE_PV_EMAILS=dev@local`。
 - PR 1 拿掉的「i18n 動態鍵覆蓋率」測試已加回（`i18n/translations.test.ts`）；caseWork 雙語鍵完整性等 PR 4 搬 `i18n/work.ts` 時加回。
@@ -117,8 +117,9 @@ PV-Link 在前端以「看得到的個案」配號，但手機看不到別人的
    repo 已刪除、無法修。切換上線前的新個案仍會重號；越早切換，要人工處理的越少。
 3. **唯一限制。** 因為已有重號，現在加不了 `UNIQUE(case_number)`。重號清完、pvlink 撤除後，可再補一個 migration（手動套用）。
 
-**`/api/sync` 沒有角色限制。** 業務加進 Access 後，可以直接呼叫 API 在同步用的 `DB` 存一份自己的快照
-（只限自己的信箱，讀不到別人的）。風險低，但切換上線前宜一併限制為 PV。
+**`/api/sync` 沒有角色限制——已修。** 原本業務加進 Access 後，可以直接呼叫 API 在同步用的 `DB` 存一份自己的快照。
+現在 `/api/sync*` 與 `/llm/*` 共用 `worker/index.ts` 的 `pvGate`：身分只取驗證過的 Access JWT（不再信任
+`Cf-Access-Authenticated-User-Email` 標頭），非 PV 一律 403、不碰 `DB`。快照仍以信箱為鍵：JWT 的 email 與原本標頭的值同樣來自 Access 登入身分，既有快照應可沿用——部署後開同步面板確認看得到原本的雲端快照。
 
 **新個案無法建立第一筆內部工作——PR 4 已修。** 內部工作台只列出「指派給自己、且內部到期日落在所選範圍」的工作
 （`worker/ae/work.js` 的 workbench 查詢），編輯器原本只能從列表開啟。現在個案頁有「內部工作」按鈕可直接開啟。
