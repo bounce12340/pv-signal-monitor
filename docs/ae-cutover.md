@@ -22,7 +22,7 @@
 | 0 | 備份、唯讀檢查、設 `AE_PV_EMAILS` secret | 否 | — |
 | 1 | 部署 `main` 到 pv.uic-ai.com，藥安冒煙測試 | 否（業務還沒在 Access 裡） | `wrangler rollback` |
 | 2 | 虛擬個案驗收（藥安帳號） | 否 | 軟刪除測試個案 |
-| 3 | 決定 `/api/sync` 要不要先限制為 PV | 否 | — |
+| 3 | `/api/sync` 限制為 PV（已由 [#9](https://github.com/bounce12340/pv-signal-monitor/pull/9) 完成，隨階段 1 部署） | 否 | — |
 | 4 | 加一個測試業務帳號，驗角色分權 | 否 | 從 Access 移除 |
 | 5 | 全體業務加入 Access，公布新網址 | **是**：開始在新網址通報 | 從 Access 移除 |
 | 6 | 清空各手機上 PV-Link 的待補送佇列 | 是 | — |
@@ -93,8 +93,8 @@ npx wrangler secret list              # 確認多了 AE_PV_EMAILS
 
 - 只能用 `wrangler secret put`，不可寫進 `wrangler.jsonc` 的 `vars`（是真實員工信箱，repo 是公開的）。
 - `secret put` 會立即以「目前線上的程式碼 + 新 secret」部署一個新版本，對現有功能沒有影響。
-- **必須在階段 1 之前做。** `main` 的 `/llm/*`、`/ollama-cloud/*` 只放行 PV，沒有這個 secret（且 `ae_users` 也沒有 pv）時，
-  部署當下所有人的 AI 功能都會變成 403。
+- **必須在階段 1 之前做。** `main` 的 `/llm/*`、`/ollama-cloud/*` 與 `/api/sync*` 只放行 PV，沒有這個 secret（且 `ae_users` 也沒有 pv）時，
+  部署當下所有人的 AI 功能與雲端同步都會變成 403。
 
 ### 0-6　確認 Access 設定
 
@@ -149,7 +149,7 @@ npx wrangler deployments status   # 記下新的 version ID
 | AI 功能 | 跑一次會呼叫模型的功能（例如標籤 AE 主檔擷取） | 正常回應，沒有 403 |
 | 通報收案 | 左側選單「通報收案」 | 列出既有個案，數量與 pvlink 後台一致（同一個資料庫） |
 | 通報表單 | 開 `https://pv.uic-ai.com/#/report` | 出現業務通報表單（首次會先出現「通報者基本資料」） |
-| 同步 | 原本有用雲端同步的話，照常操作一次 | 與部署前相同 |
+| 雲端同步 | 開 `https://pv.uic-ai.com/api/sync/latest`，再打開主系統的同步面板 | 回 JSON（不是 403）；原本有用同步的話，`updated_at`／`device` 與同步面板顯示的雲端快照都是部署前那一份 |
 
 ### 出問題時
 
@@ -158,6 +158,8 @@ npx wrangler deployments status   # 記下新的 version ID
 | AI 功能 403 `requires PV role` | `AE_PV_EMAILS` 沒設、打錯，或不是這支 Worker 的 | 重做 0-5；不必重新部署 |
 | AE API 401 `unauthorized`（或 `unauthorized: missing Access token`） | 沒經過 Access，或 JWT 驗不過（多半是 `ACCESS_AUD` 不一致） | 重做 0-6 |
 | AE API 503 `Access configuration incomplete` | `ACCESS_TEAM_DOMAIN`／`ACCESS_AUD` 只設了一個 | 檢查 `wrangler.jsonc` 的 `vars` |
+| 同步回 403 `requires PV role` | 同 AI 功能 403 | 重做 0-5 |
+| 同步不是 403，但 `updated_at` 是 `null`、看不到部署前的雲端快照 | 快照以信箱為鍵，現在改取 Access JWT 裡的 email（原本取標頭）；兩者理論上相同，若大小寫或內容不同就會對不上 | **先不要在同步面板按上傳**。唯讀比對：`npx wrangler d1 execute pv-signal-monitor --remote --command "SELECT DISTINCT user_email FROM snapshots"` 與 `/api/me` 的 `email`；對不上就回復上一版並告訴我，不要改 D1 |
 | 其他無法當場排除的錯誤 | — | 回復：`npx wrangler rollback <0-1 記下的 version ID> --message "rollback AE cutover"` |
 
 回復只換程式碼版本，不影響 D1 資料與 secret。
@@ -243,15 +245,13 @@ npx wrangler deployments status   # 記下新的 version ID
 
 ---
 
-## 階段 3　加業務之前的決定：`/api/sync`
+## 階段 3　加業務之前的決定：`/api/sync`（已決定）
 
-業務一加進 Access，就能直接呼叫 `/api/sync` 在同步用的 `DB` 存一份**自己的**快照（讀不到別人的）。
-影響有限，但這支 API 本來就只給藥安用。兩個選項：
+業務一加進 Access，原本就能直接呼叫 `/api/sync` 在同步用的 `DB` 存一份**自己的**快照。
+已決定**先限制為 PV 再加業務**：[#9](https://github.com/bounce12340/pv-signal-monitor/pull/9) 讓 `/api/sync*` 與 `/llm/*`
+走同一道 PV 檢查，身分只取驗證過的 Access JWT，且已合併進 `main`——階段 1 部署的就是這個版本，這一階段不必另外動作。
 
-- **先限制為 PV 再加業務**（建議）：請我開一個小 PR，讓 `/api/sync*` 走與 `/llm/*` 相同的 PV 檢查；合併、部署後再進階段 4。
-- **接受現況**：記錄這個決定，之後再補。
-
-**階段 3 通過條件**：已決定，且若選擇限制，該 PR 已部署並重做階段 1 的冒煙測試。
+**階段 3 通過條件**：階段 1 的「雲端同步」檢查通過；業務被擋的部分在階段 4 驗。
 
 ---
 
@@ -268,6 +268,7 @@ npx wrangler deployments status   # 記下新的 version ID
 | 首頁也只給表單 | 開 `https://pv.uic-ai.com/`（不帶 `#/report`） | 先「通報者基本資料」（若未填過），之後**只有通報表單**，進不了主系統 |
 | 角色 | 開 `https://pv.uic-ai.com/api/me` | `"role":"rep"` |
 | LLM 被擋 | 開 `https://pv.uic-ai.com/llm/v1/models` | `{"error":"forbidden: requires PV role"}`（HTTP 403） |
+| 同步被擋 | 開 `https://pv.uic-ai.com/api/sync/latest` | `{"error":"forbidden: requires PV role"}`（HTTP 403） |
 | 只看得到自己的 | 送一筆【測試】個案後，開 `https://pv.uic-ai.com/api/ae-reports` | `cases` 只有自己送的個案。這一項驗的是後端，比畫面可靠 |
 | 我的通報紀錄 | 表單右上角 →「我的通報紀錄」 | 只有自己送的那一筆 |
 | 稽核操作者 | 藥安帳號在後台開這筆個案的稽核軌跡 | 操作者是**測試業務的信箱** |
