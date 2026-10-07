@@ -9,6 +9,7 @@ import { openPrintReport } from './printReport';
 import { aggregateSignals } from '../services/literature/signals';
 import { DB_KEY as LIT_DB_KEY, loadRecordsSync } from '../services/literature/storage';
 import type { PVRecord } from '../services/literature/types';
+import { StatusBadge, SeriousBadge } from './StatusBadge';
 import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft, Download, Check, Save, AlertTriangle, Printer, Sparkles, Loader2, FlaskConical, Search } from 'lucide-react';
 
 interface CountRow { term: string; count: string; serious: boolean; }
@@ -500,7 +501,7 @@ export const MonitorMode = React.memo(({
               <button
                 onClick={() => runAnalysis()}
                 disabled={!masterResult}
-                className="px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg shadow-lg shadow-brand-200 transition-all flex items-center gap-2 disabled:opacity-50"
+                className="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg shadow-lg shadow-brand-200 transition-all flex items-center gap-2 disabled:opacity-50"
               >
                 <Activity size={18} />
                 執行訊號分析
@@ -517,7 +518,7 @@ export const MonitorMode = React.memo(({
                       <button
                         onClick={() => setShowAllTerms(!showAllTerms)}
                         className={`flex items-center gap-2 px-3 py-1 text-xs font-medium rounded transition-all ${
-                          showAllTerms ? 'bg-brand-500 text-white' : 'text-slate-400 hover:text-white'
+                          showAllTerms ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'
                         }`}
                       >
                         {showAllTerms ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
@@ -552,7 +553,7 @@ export const MonitorMode = React.memo(({
                       <button 
                         onClick={handleSaveAnalysis}
                         disabled={monitorSaveStatus === 'saved'}
-                        className={`text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1 transition-colors ${monitorSaveStatus === 'saved' ? 'bg-green-500 text-white' : 'bg-white text-slate-900 hover:bg-slate-100'}`}
+                        className={`text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1 transition-colors ${monitorSaveStatus === 'saved' ? 'bg-green-700 text-white' : 'bg-white text-slate-900 hover:bg-slate-100'}`}
                       >
                         {monitorSaveStatus === 'saved' ? <Check size={14}/> : <Save size={14}/>}
                         {monitorSaveStatus === 'saved' ? '已存入' : '儲存報表'}
@@ -575,7 +576,7 @@ export const MonitorMode = React.memo(({
                       <div className="text-2xl font-bold text-slate-900">{analysisReport.alerts.length}</div>
                     </div>
                     <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-lg">
-                      <div className="text-yellow-600 text-xs font-bold uppercase mb-1">⚠️ 關注提醒</div>
+                      <div className="text-amber-800 text-xs font-bold uppercase mb-1">⚠️ 關注提醒</div>
                       <div className="text-2xl font-bold text-slate-900">{analysisReport.rows.filter(r => r.status === 'warning').length}</div>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
@@ -616,7 +617,7 @@ export const MonitorMode = React.memo(({
                           <th className="px-4 py-3">AE Term</th>
                           <th className="px-4 py-3">SOC / 仿單頻率</th>
                           <th className="px-4 py-3 text-right">本季 Count</th>
-                          <th className="px-4 py-3 text-right">本季 Rate (%)<br /><span className="font-normal text-[10px] text-slate-400">95% CI (Poisson)</span></th>
+                          <th className="px-4 py-3 text-right">本季 Rate (%)<br /><span className="font-normal text-[10px] text-slate-600">95% CI (Poisson)</span></th>
                           <th className="px-4 py-3 text-right">仿單門檻 (%)</th>
                         </tr>
                       </thead>
@@ -634,9 +635,7 @@ export const MonitorMode = React.memo(({
                               <div className="flex flex-col gap-1 items-start">
                                 {row.status === 'unexpected' && row.serious && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-800 text-white shadow-sm animate-pulse"><AlertTriangle size={12}/> 未預期＋嚴重</span>}
                                 {row.status === 'unexpected' && !row.serious && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-600 text-white shadow-sm"><AlertTriangle size={12}/> 未預期 (Unexpected)</span>}
-                                {row.status === 'alert' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-200 text-red-800">⚠️ 異常</span>}
-                                {row.status === 'warning' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-yellow-200 text-yellow-800">⚠️ 提醒</span>}
-                                {row.status === 'normal' && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">正常</span>}
+                                {row.status !== 'unexpected' && <StatusBadge status={row.status} />}
                                 {row.noise_suppressed && (
                                   <span
                                     className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200"
@@ -649,9 +648,7 @@ export const MonitorMode = React.memo(({
                             </td>
                             <td className="px-4 py-3 font-medium text-slate-900">
                               {row.ae_term}
-                              {row.serious && row.status !== 'unexpected' && (
-                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200" title="含嚴重案例">S</span>
-                              )}
+                              {row.serious && row.status !== 'unexpected' && <SeriousBadge />}
                             </td>
                             <td className="px-4 py-3 text-slate-500 text-xs">
                               {row.status === 'unexpected' ? (
@@ -677,7 +674,7 @@ export const MonitorMode = React.memo(({
                                     </button>
                                   )}
                                   {row.ae_term in aiMappings && aiMappings[row.ae_term] === null && (
-                                    <span className="block text-[10px] text-slate-400" title="AI 未在主檔中找到語意相同的詞彙">
+                                    <span className="block text-[10px] text-slate-600" title="AI 未在主檔中找到語意相同的詞彙">
                                       AI：非主檔同義詞（真未預期）
                                     </span>
                                   )}
@@ -697,7 +694,7 @@ export const MonitorMode = React.memo(({
                             }`}>
                               {row.incidence_rate_pct.toFixed(4)}%
                               <div
-                                className="font-normal text-[10px] text-slate-400"
+                                className="font-normal text-xs text-slate-600"
                                 title="發生率的 Poisson exact 95% 信賴區間"
                               >
                                 {formatCI(row.ci_95)}
@@ -779,7 +776,7 @@ export const MonitorMode = React.memo(({
                           <td className="px-4 py-2.5 text-xs text-slate-500 italic">{g.soc}</td>
                           <td className="px-4 py-2.5 text-center font-mono">{g.count}</td>
                           <td className="px-4 py-2.5 text-center font-mono text-rose-600">{g.seriousCount || '—'}</td>
-                          <td className="px-4 py-2.5 text-[10px] font-mono text-slate-400 max-w-xs truncate" title={g.pmids.join(', ')}>{g.pmids.join(', ') || '—'}</td>
+                          <td className="px-4 py-2.5 text-[10px] font-mono text-slate-600 max-w-xs truncate" title={g.pmids.join(', ')}>{g.pmids.join(', ') || '—'}</td>
                         </tr>
                       );
                     })}

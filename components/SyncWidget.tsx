@@ -148,7 +148,7 @@ export const SyncWidget = ({ refreshKey, onPulled }: SyncWidgetProps) => {
                 雲端有較新的資料快照（來自 {server?.device || '未知裝置'}，
                 {server?.updated_at ? new Date(server.updated_at).toLocaleString() : ''}）。
               </p>
-              <button onClick={handlePull} className="w-full py-1.5 text-xs font-medium rounded bg-brand-600 text-white hover:bg-brand-700 flex items-center justify-center gap-1">
+              <button onClick={handlePull} className="w-full py-1.5 text-xs font-medium rounded bg-primary text-white hover:bg-primary-hover flex items-center justify-center gap-1">
                 <CloudDownload size={13} /> 下載雲端資料（覆蓋本機）
               </button>
             </>

@@ -4,6 +4,7 @@ import { Database, FolderOpen, Eye, Trash2, History, List, Calculator, Activity,
 import { DetailModal } from './DetailModal';
 import { TrendView } from './TrendView';
 import { MasterVersion, diffMasters } from '../services/versions';
+import { StatusBadge, SeriousBadge } from './StatusBadge';
 
 interface LibraryModeProps {
   savedProducts: Product[];
@@ -165,31 +166,36 @@ export const LibraryMode = React.memo(({
                       <td className="px-4 py-3 text-right flex justify-end gap-2">
                         <button
                           onClick={() => handleViewProduct(p)}
-                          className="text-brand-600 bg-brand-50 hover:bg-brand-100 p-1.5 rounded transition-colors"
+                          className="text-brand-700 bg-brand-50 hover:bg-brand-100 px-2 py-1.5 rounded transition-colors inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap"
                           title="檢視詳細主檔"
+                          aria-label={`檢視詳細主檔：${p.product_name}`}
                         >
-                          <Eye size={16} />
+                          <Eye size={16} aria-hidden="true" />
+                          檢視主檔
                         </button>
                         <button
                           onClick={() => handleViewTrend(p)}
                           className="text-emerald-600 bg-emerald-50 hover:bg-emerald-100 p-1.5 rounded transition-colors"
                           title="跨季趨勢分析"
+                          aria-label={`跨季趨勢分析：${p.product_name}`}
                         >
-                          <TrendingUp size={16} />
+                          <TrendingUp size={16} aria-hidden="true" />
                         </button>
                         <button
                           onClick={() => handleViewVersions(p)}
                           className="text-violet-600 bg-violet-50 hover:bg-violet-100 p-1.5 rounded transition-colors"
                           title="主檔版本歷史與差異比較"
+                          aria-label={`主檔版本歷史與差異比較：${p.product_name}`}
                         >
-                          <Layers size={16} />
+                          <Layers size={16} aria-hidden="true" />
                         </button>
                         <button 
                           onClick={() => handleDeleteProduct(p.product_id)} 
                           className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors"
-                          title="刪除"
+                          title="刪除產品"
+                          aria-label={`刪除產品：${p.product_name}`}
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={16} aria-hidden="true" />
                         </button>
                       </td>
                     </tr>
@@ -250,15 +256,17 @@ export const LibraryMode = React.memo(({
                             onClick={() => handleViewBatch(batch)}
                             className="text-brand-600 bg-brand-50 hover:bg-brand-100 p-1.5 rounded transition-colors"
                             title="檢視報表內容"
+                            aria-label={`檢視報表內容：${batch.quarter}`}
                           >
-                            <List size={16} />
+                            <List size={16} aria-hidden="true" />
                           </button>
                           <button 
                             onClick={() => handleDeleteBatch(batch)}
                             className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors"
                             title="刪除此份報表"
+                            aria-label={`刪除此份報表：${batch.quarter}`}
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={16} aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -462,21 +470,14 @@ export const LibraryMode = React.memo(({
                     <tr key={r.id} className={`hover:bg-slate-50 ${r.status === 'red' ? 'bg-red-50' : r.status === 'yellow' ? 'bg-yellow-50' : ''}`}>
                       <td className="px-3 py-2 font-medium">
                         {r.ae_term}
-                        {r.serious && (
-                          <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200" title="含嚴重案例">S</span>
-                        )}
+                        {r.serious && <SeriousBadge />}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">{r.count}</td>
                       <td className="px-3 py-2 text-right font-mono font-bold text-slate-700">{r.rate_pct.toFixed(4)}%</td>
                       <td className="px-3 py-2 text-right font-mono text-slate-400">{r.threshold_pct}%</td>
                       <td className="px-3 py-2 text-center">
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          r.status === 'red' ? 'bg-red-200 text-red-800' : 
-                          r.status === 'yellow' ? 'bg-yellow-200 text-yellow-800' : 
-                          'bg-green-100 text-green-800'
-                        }`}>
-                          {r.status.toUpperCase()}
-                        </span>
+                        {/* 未預期（未登載於主檔）在資料庫裡也存成 red，另有 unexpected 旗標，這裡分開標示。 */}
+                        <StatusBadge status={r.unexpected ? 'unexpected' : r.status} />
                       </td>
                     </tr>
                   ))}

@@ -57,7 +57,7 @@ export const CiomsModal = ({ ciomsText, onClose }: CiomsModalProps) => {
         <div className="flex gap-3 px-6 py-4 border-t border-slate-100">
           <button
             onClick={handleCopy}
-            className="flex-1 bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-lg font-medium text-sm shadow-md flex items-center justify-center gap-2 transition-colors"
+            className="flex-1 bg-primary hover:bg-primary-hover text-white py-2.5 rounded-lg font-medium text-sm shadow-md flex items-center justify-center gap-2 transition-colors"
           >
             {copied ? <Check size={16} /> : <Copy size={16} />}
             {copied ? '已複製' : '複製全文'}

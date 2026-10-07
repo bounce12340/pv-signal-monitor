@@ -72,7 +72,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('dashboard')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'dashboard' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'dashboard' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <LayoutDashboard size={16}/>
@@ -81,7 +81,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('generator')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'generator' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'generator' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <FileText size={16}/>
@@ -90,7 +90,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('litSearch')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'litSearch' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'litSearch' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Search size={16}/>
@@ -99,19 +99,19 @@ export default function App() {
             <button
               onClick={() => setActiveMode('litReview')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'litReview' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'litReview' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <ClipboardCheck size={16}/>
               3. 文獻核閱
               {pendingLitCount > 0 && (
-                <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{pendingLitCount}</span>
+                <span className="bg-amber-100 text-amber-900 text-xs font-bold rounded-full px-1.5 py-0.5 leading-none">{pendingLitCount}</span>
               )}
             </button>
             <button
               onClick={() => setActiveMode('monitor')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'monitor' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'monitor' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Activity size={16}/>
@@ -120,7 +120,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('litLibrary')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'litLibrary' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'litLibrary' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <BookOpen size={16}/>
@@ -129,7 +129,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('aeIntake')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'aeIntake' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'aeIntake' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Inbox size={16}/>
@@ -138,7 +138,7 @@ export default function App() {
             <button
               onClick={() => setActiveMode('library')}
               className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
-                activeMode === 'library' ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                activeMode === 'library' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Database size={16}/>
@@ -247,7 +247,7 @@ export default function App() {
         {activeMode === 'aeIntake' && <AEIntakePage />}
       </div>
 
-      <footer className="max-w-6xl mx-auto px-4 pb-6 text-center text-[11px] text-slate-400">
+      <footer className="max-w-6xl mx-auto px-4 pb-6 text-center text-[11px] text-slate-600">
         PV 智慧監測平台 · build {__BUILD_INFO__}
       </footer>
     </div>

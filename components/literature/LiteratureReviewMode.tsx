@@ -139,13 +139,13 @@ export const LiteratureReviewMode = React.memo(({
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-slate-500 whitespace-nowrap">分數門檻 {minScore}</span>
               <input type="range" min={0} max={100} step={5} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} className="flex-1 accent-brand-600" />
-              <span className="text-[11px] text-slate-400 whitespace-nowrap">{visiblePending.length}/{pending.length}</span>
+              <span className="text-[11px] text-slate-600 whitespace-nowrap">{visiblePending.length}/{pending.length}</span>
             </div>
           )}
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {pending.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 py-12">
+            <div className="h-full flex flex-col items-center justify-center text-slate-600 py-12">
               <Inbox size={40} className="mb-2 opacity-40" />
               <p className="text-sm">尚無待核閱文獻，請先至「文獻檢索」執行搜尋</p>
             </div>
@@ -159,7 +159,7 @@ export const LiteratureReviewMode = React.memo(({
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${scoreBadgeClass(r.relevance_score || 0)}`} title={r.relevance_reason}>
                   分數 {r.relevance_score ?? '—'}
                 </span>
-                <span className="text-[10px] text-slate-400">PMID:{r.pmid}</span>
+                <span className="text-[10px] text-slate-600">PMID:{r.pmid}</span>
               </div>
               <div className="text-[10px] text-brand-600 font-mono mb-0.5">{r.dp}</div>
               <h3 className="text-sm font-medium text-slate-800 line-clamp-2">{r.title}</h3>
@@ -170,7 +170,7 @@ export const LiteratureReviewMode = React.memo(({
 
       <div className="lg:col-span-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-slate-200 p-6 overflow-y-auto max-h-[80vh]">
         {!selectedRecord ? (
-          <div className="h-full flex flex-col items-center justify-center text-slate-300 py-20">
+          <div className="h-full flex flex-col items-center justify-center text-slate-600 py-20">
             <FileText size={48} className="mb-2 opacity-30" />
             <p className="text-sm">從左側清單選擇一篇文獻查看詳情</p>
           </div>
@@ -236,7 +236,7 @@ export const LiteratureReviewMode = React.memo(({
                     ['結果', selectedRecord.pv_data.outcome],
                   ].map(([label, value]) => (
                     <div key={label as string}>
-                      <div className="text-[9px] font-bold text-slate-400 uppercase">{label}</div>
+                      <div className="text-[9px] font-bold text-slate-600 uppercase">{label}</div>
                       <div className="font-medium text-slate-700 break-words">{value || <span className="text-slate-300">—</span>}</div>
                     </div>
                   ))}
@@ -255,7 +255,7 @@ export const LiteratureReviewMode = React.memo(({
                 <FileText size={16} /> 產生 CIOMS 草稿
               </button>
               {!alreadyImported ? (
-                <button onClick={() => handleImport(selectedRecord)} className="flex-1 bg-green-600 text-white py-3 rounded-lg font-medium text-sm shadow-md hover:bg-green-700 flex items-center justify-center gap-2">
+                <button onClick={() => handleImport(selectedRecord)} className="flex-1 bg-green-700 text-white py-3 rounded-lg font-medium text-sm shadow-md hover:bg-green-800 flex items-center justify-center gap-2">
                   <PackagePlus size={16} /> 確認入庫
                 </button>
               ) : (
