@@ -61,10 +61,15 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   `extractPubDate`/`resolveMonth` already encode this; don't bypass them.
   it is *edat* (PubMed entry date), not *pdat* (publication date) — see `pubmed.ts` esearch `datetype` param.
 - No API key, upstream URL, or other secret belongs in frontend code, `wrangler.jsonc` `vars`, or
-  git history. The only secret is `OLLAMA_API_KEY`, set via `wrangler secret put` and read solely by
-  `worker/index.ts`. `wrangler.jsonc` intentionally sets `"workers_dev": false` — the Worker injects
+  git history. The secrets are `OLLAMA_API_KEY` and the optional Future AGI pair
+  `FI_API_KEY`/`FI_SECRET_KEY`, all set via `wrangler secret put` and read solely by `worker/`. `wrangler.jsonc` intentionally sets `"workers_dev": false` — the Worker injects
   that key into unauthenticated requests, so a `workers.dev` URL would be an open proxy for it; the
   only route is the custom domain sitting behind an access-control layer in front of it.
+- Future AGI tracing (`worker/tracing.ts`) is **metadata only**: model names, token counts, timing,
+  HTTP status and proxy route. LLM bodies carry label text, literature and AE case narratives, so
+  never add prompt/response content, request headers or the caller's identity to a span; the
+  bodies are parsed there solely for `model` and `usage`. It runs in `ctx.waitUntil` and must never
+  delay or fail a proxied call.
 - `services/db.ts` / `services/settings.ts` expose a **synchronous** read API backed by an
   in-memory cache hydrated at boot (`index.tsx` → `initStorage`). Don't add new persisted keys
   without adding them to the relevant `*_KEY_LIST` export, or they won't be hydrated, migrated, or
@@ -92,7 +97,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 34 test files / 456 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 35 test files / 468 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
@@ -102,6 +107,10 @@ npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning i
 `worker/index.ts`), and — for the platform-default LLM proxy and the Ollama-Cloud alias to actually
 authenticate — the `OLLAMA_API_KEY` Worker secret. `wrangler.jsonc` `vars.LLM_BASE_URL` controls the
 upstream for `/llm/*`; the app itself never reads a `.env` file.
+
+Optional Future AGI tracing of the LLM proxies: `npx wrangler secret put FI_API_KEY` and
+`FI_SECRET_KEY` (both, or it stays off). `FI_PROJECT_NAME` (default `pv-signal-monitor`) and
+`FI_BASE_URL` (default `https://api.futureagi.com`) may go in `vars`; they are not secrets.
 
 The AE case API additionally binds the existing PV-Link D1 database `pv-link-ae` (`AE_DB`) and R2
 bucket `pv-link-ae-attachments` (`AE_FILES`), verifies Access JWTs against `ACCESS_TEAM_DOMAIN` /

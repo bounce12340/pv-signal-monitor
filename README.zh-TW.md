@@ -124,6 +124,7 @@ npx wrangler deploy
 
 - **靜態資產＋SPA fallback** 直接提供服務；只有 `/llm/*`（平台 LLM 代理）、`/ollama-cloud/*`（相容別名）與 `/api/*`（同步）會呼叫 Worker。
 - **伺服器端 LLM 金鑰：** `npx wrangler secret put OLLAMA_API_KEY` 讓平台預設與 Ollama-Cloud 別名路由能在不帶任何用戶端金鑰的情況下向上游驗證身分。這之所以安全，是因為部署完全位於自訂網域前方的存取控制層之後——`wrangler.jsonc` 刻意將 `workers_dev` 設為**停用**，因為 `workers.dev` 網址會繞過該存取控制層，讓 Worker 變成注入金鑰的開放代理。
+- **選用：Future AGI 追蹤：** 執行 `npx wrangler secret put FI_API_KEY` 與 `npx wrangler secret put FI_SECRET_KEY` 後，Worker 會把每一次 `/llm/*`、`/ollama-cloud/*` 的 POST 呼叫，以一筆 span 回報到 [Future AGI](https://github.com/future-agi/future-agi)，用來監控模型、token 用量、耗時與錯誤。span **只含 metadata**（模型名稱、token 數、耗時、HTTP 狀態、代理路由），不含任何 prompt 或回應內容、標頭或使用者身分，因為這些呼叫會帶有仿單文字、文獻與 AE 個案敘述。兩個 secret 都沒設定時不會送出任何資料。`FI_PROJECT_NAME`（預設 `pv-signal-monitor`）與 `FI_BASE_URL`（預設 `https://api.futureagi.com`，或自架的位址）可放在 `vars`。實作見 `worker/tracing.ts`。
 - **限流：** 以 KV 為後端的固定窗限流器，對 `/llm/*` 與 `/ollama-cloud/*` 路由限制每 IP 每分鐘的請求數（KV 命名空間不可用時會 fail open，不阻擋請求）。
 - **跨裝置同步：** 需要一個 D1 資料庫（`npx wrangler d1 create pv-signal-monitor`，再建立 `snapshots` 資料表——見 `worker/index.ts`）以及網域前方的存取控制層；使用者身分來自該控制層注入的 `Cf-Access-Authenticated-User-Email` 標頭。
 - **CI/CD：** `.github/workflows/ci.yml` 會在每次推送時執行型別檢查／測試／建置，並在設定好 `CLOUDFLARE_API_TOKEN`（＋選填 `CLOUDFLARE_ACCOUNT_ID`）repo secrets 後自動部署 `main` 分支。
