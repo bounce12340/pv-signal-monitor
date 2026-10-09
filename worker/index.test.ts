@@ -291,3 +291,142 @@ describe('/api/sync is PV-only', () => {
     expect(bound).toEqual([['dev@local']]);
   });
 });
+
+describe('Future AGI tracing of the LLM proxies (metadata only)', () => {
+  const FI_TRACES = 'https://api.futureagi.com/tracer/v1/traces';
+  const tracingEnv = (over: Record<string, unknown> = {}) => baseEnv({
+    AE_PV_EMAILS: 'pv@example.test',
+    FI_API_KEY: 'fi-key',
+    FI_SECRET_KEY: 'fi-secret',
+    ...over,
+  });
+  // Collects ctx.waitUntil work so a test can await the background export.
+  const makeCtx = () => {
+    const pending: Promise<unknown>[] = [];
+    return { ctx: { waitUntil: (p: Promise<unknown>) => { pending.push(p); } }, settle: () => Promise.all(pending) };
+  };
+  const completion = {
+    id: 'c1', model: 'deepseek-v4-pro',
+    choices: [{ message: { role: 'assistant', content: 'SECRET-AE-NARRATIVE' } }],
+    usage: { prompt_tokens: 321, completion_tokens: 54, total_tokens: 375 },
+  };
+  // Upstream + Future AGI stand-in. `exports` gets every Future AGI POST.
+  function stubNetwork(exports: { url: string; init: RequestInit }[], opts: { upstreamStatus?: number; fiFails?: boolean } = {}) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url.includes('cloudflareaccess.com')) return Response.json({ keys: [{ ...jwk, kid: 'test-key' }] });
+      if (url.startsWith('https://api.futureagi.com')) {
+        exports.push({ url, init });
+        if (opts.fiFails) throw new Error('collector down');
+        return new Response(null, { status: 200 });
+      }
+      return Response.json(completion, { status: opts.upstreamStatus ?? 200 });
+    }));
+  }
+  const post = async (env: any, ctx: any, body = '{"model":"","messages":[{"role":"user","content":"SECRET-PROMPT"}]}') =>
+    worker.fetch(new Request('https://pv.example.test/llm/chat/completions', {
+      method: 'POST', body,
+      headers: { 'Content-Type': 'application/json', 'Cf-Access-Jwt-Assertion': await token() },
+    }), env, ctx);
+  const attrsOf = (payload: any) => Object.fromEntries(
+    payload.resourceSpans[0].scopeSpans[0].spans[0].attributes.map((a: any) => [a.key, a.value.stringValue ?? Number(a.value.intValue)]),
+  );
+
+  it('sends nothing without FI keys', async () => {
+    const exports: any[] = [];
+    stubNetwork(exports);
+    const { ctx, settle } = makeCtx();
+    const res = await post(baseEnv({ AE_PV_EMAILS: 'pv@example.test' }), ctx);
+    await settle();
+    expect(res.status).toBe(200);
+    expect(exports).toEqual([]);
+  });
+
+  it('reports model, tokens and status but no content or identity', async () => {
+    const exports: { url: string; init: RequestInit }[] = [];
+    stubNetwork(exports);
+    const { ctx, settle } = makeCtx();
+    const res = await post(tracingEnv({ LLM_MODEL: 'deepseek-v4-pro' }), ctx);
+
+    // The browser still gets the full, unmodified completion.
+    expect(await res.json()).toEqual(completion);
+    await settle();
+
+    expect(exports).toHaveLength(1);
+    expect(exports[0].url).toBe(FI_TRACES);
+    const headers = new Headers(exports[0].init.headers);
+    expect(headers.get('X-Api-Key')).toBe('fi-key');
+    expect(headers.get('X-Secret-Key')).toBe('fi-secret');
+    expect(headers.get('Content-Type')).toBe('application/json');
+
+    const raw = String(exports[0].init.body);
+    expect(raw).not.toContain('SECRET-PROMPT');
+    expect(raw).not.toContain('SECRET-AE-NARRATIVE');
+    expect(raw).not.toContain('pv@example.test');
+    expect(raw).not.toContain('fi-key');
+
+    const payload = JSON.parse(raw);
+    const resource = Object.fromEntries(payload.resourceSpans[0].resource.attributes.map((a: any) => [a.key, a.value.stringValue]));
+    expect(resource.project_name).toBe('pv-signal-monitor');
+    expect(resource.project_type).toBe('observe');
+    expect(attrsOf(payload)).toMatchObject({
+      'gen_ai.span.kind': 'LLM',
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.provider.name': 'ollama',
+      'gen_ai.request.model': 'deepseek-v4-pro', // injected by LLM_MODEL
+      'gen_ai.response.model': 'deepseek-v4-pro',
+      'gen_ai.usage.input_tokens': 321,
+      'gen_ai.usage.output_tokens': 54,
+      'gen_ai.usage.total_tokens': 375,
+      'http.response.status_code': 200,
+      'url.path': '/v1/chat/completions',
+      'pv.proxy_route': '/llm',
+    });
+    expect(payload.resourceSpans[0].scopeSpans[0].spans[0].status.code).toBe(1);
+  });
+
+  it('honours FI_PROJECT_NAME and FI_BASE_URL', async () => {
+    const exports: any[] = [];
+    stubNetwork(exports);
+    const { ctx, settle } = makeCtx();
+    await post(tracingEnv({ FI_PROJECT_NAME: 'pv-staging', FI_BASE_URL: 'https://api.futureagi.com/' }), ctx);
+    await settle();
+    const payload = JSON.parse(String(exports[0].init.body));
+    expect(exports[0].url).toBe(FI_TRACES); // trailing slash trimmed
+    expect(payload.resourceSpans[0].resource.attributes[0].value.stringValue).toBe('pv-staging');
+  });
+
+  it('marks an upstream error as a failed span', async () => {
+    const exports: any[] = [];
+    stubNetwork(exports, { upstreamStatus: 500 });
+    const { ctx, settle } = makeCtx();
+    const res = await post(tracingEnv(), ctx);
+    await settle();
+    expect(res.status).toBe(500);
+    const payload = JSON.parse(String(exports[0].init.body));
+    expect(payload.resourceSpans[0].scopeSpans[0].spans[0].status).toEqual({ code: 2, message: 'HTTP 500' });
+  });
+
+  it('never lets a Future AGI failure affect the proxied response', async () => {
+    const exports: any[] = [];
+    stubNetwork(exports, { fiFails: true });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { ctx, settle } = makeCtx();
+    const res = await post(tracingEnv(), ctx);
+    expect(await res.json()).toEqual(completion);
+    await expect(settle()).resolves.toBeDefined();
+    expect(exports).toHaveLength(1);
+  });
+
+  it('does not trace GET (model list) calls or calls without a ctx', async () => {
+    const exports: any[] = [];
+    stubNetwork(exports);
+    const { ctx, settle } = makeCtx();
+    await worker.fetch(new Request('https://pv.example.test/llm/models', {
+      headers: { 'Cf-Access-Jwt-Assertion': await token() },
+    }), tracingEnv(), ctx);
+    await post(tracingEnv(), undefined);
+    await settle();
+    expect(exports).toEqual([]);
+  });
+});

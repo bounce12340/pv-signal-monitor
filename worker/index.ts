@@ -18,10 +18,14 @@
 // reps get into Access to file AE reports, and must neither spend the
 // OLLAMA_API_KEY that /llm and /ollama-cloud inject nor store snapshots in
 // the sync database, which exists only for the PV app.
+//
+// With FI_API_KEY/FI_SECRET_KEY set, the LLM proxies also report one
+// metadata-only span per call to Future AGI (see worker/tracing.ts).
 
 import { verifyAccessJwt, AccessPayload } from './accessJwt';
 // Ported verbatim from PV-Link (plain JS, already covered by its own tests).
 import { handleAeRequest, resolveRole } from './ae/ae.js';
+import { exportLlmSpan, readModel, traceResponse, tracingEnabled, TracingEnv } from './tracing';
 
 // Minimal D1 typings so the project needs no @cloudflare/workers-types dep.
 interface D1PreparedStatement {
@@ -39,7 +43,14 @@ interface KVNamespace {
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
 }
 
-interface Env {
+// Minimal ExecutionContext typing, same rationale as the D1 typings above.
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+// FI_API_KEY / FI_SECRET_KEY (Future AGI tracing) come from TracingEnv and,
+// like OLLAMA_API_KEY, are set only via `wrangler secret put`.
+interface Env extends TracingEnv {
   ASSETS: { fetch: typeof fetch };
   DB: D1Database;
   // Only ever set by `wrangler dev --var DEV_MODE:true`; never in
@@ -242,8 +253,11 @@ interface ProxyRoute {
 // Shared by /llm/* and /ollama-cloud/*: strips the route prefix, forwards
 // method/body/content-type to `route.upstreamBase`, injects OLLAMA_API_KEY
 // as a bearer token when the caller sent no Authorization of its own, and
-// streams the upstream response straight back.
-async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute): Promise<Response> {
+// streams the upstream response straight back. With tracing on (and a ctx to
+// finish it in the background), POSTs are also reported to Future AGI.
+async function proxyLlm(
+  request: Request, env: Env, url: URL, route: ProxyRoute, ctx?: ExecutionContext,
+): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
@@ -264,33 +278,62 @@ async function proxyLlm(request: Request, env: Env, url: URL, route: ProxyRoute)
   const contentType = request.headers.get('Content-Type');
   if (contentType) headers.set('Content-Type', contentType);
 
+  const tracer = ctx && request.method === 'POST' && tracingEnabled(env) ? ctx : undefined;
+
   // JSON bodies without a model get the platform default injected; anything
   // else (non-JSON, unparseable, model already set) is forwarded verbatim.
+  // Tracing reads the (possibly injected) model name and nothing else.
   let body: BodyInit | null | undefined = request.method === 'GET' ? undefined : request.body;
-  if (body && env.LLM_MODEL && (contentType || '').includes('application/json')) {
+  let requestModel: string | undefined;
+  if (body && (env.LLM_MODEL || tracer) && (contentType || '').includes('application/json')) {
     const text = await request.text();
     body = text;
     try {
       const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !parsed.model) {
+      if (env.LLM_MODEL && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !parsed.model) {
         parsed.model = env.LLM_MODEL;
         body = JSON.stringify(parsed);
       }
     } catch {
       // forward original text unchanged
     }
+    if (tracer) requestModel = readModel(body);
   }
 
-  const upstream = await fetch(`${route.upstreamBase}${upstreamPath}${url.search}`, {
+  const target = new URL(`${route.upstreamBase}${upstreamPath}`);
+  const span = {
+    route: route.prefix,
+    upstreamHost: target.hostname,
+    upstreamPath: target.pathname,
     method: request.method,
-    headers,
-    body,
-  });
-  return new Response(upstream.body, upstream);
+    startMs: Date.now(),
+    requestModel,
+  };
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${route.upstreamBase}${upstreamPath}${url.search}`, {
+      method: request.method,
+      headers,
+      body,
+    });
+  } catch (err) {
+    tracer?.waitUntil(exportLlmSpan(env, { ...span, endMs: Date.now() }));
+    throw err;
+  }
+  if (!tracer) return new Response(upstream.body, upstream);
+
+  // Read `usage` from a copy of the response so the browser's copy streams
+  // through untouched.
+  const isJson = (upstream.headers.get('Content-Type') || '').includes('application/json');
+  let clientBody = upstream.body;
+  let traceBody: ReadableStream<Uint8Array> | null = null;
+  if (upstream.body && isJson) [clientBody, traceBody] = upstream.body.tee();
+  tracer.waitUntil(traceResponse(env, { ...span, status: upstream.status }, traceBody, isJson));
+  return new Response(clientBody, upstream);
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (isAePath(url.pathname)) {
@@ -306,7 +349,7 @@ export default {
       return proxyLlm(request, env, url, {
         prefix: '/llm',
         upstreamBase: env.LLM_BASE_URL || DEFAULT_LLM_BASE_URL,
-      });
+      }, ctx);
     }
 
     // Compatibility alias for the pre-merge SettingsModal "Ollama Cloud"
@@ -317,7 +360,7 @@ export default {
         prefix: '/ollama-cloud',
         upstreamBase: 'https://ollama.com',
         requireUpstreamPrefix: true,
-      });
+      }, ctx);
     }
 
     return env.ASSETS.fetch(request);
