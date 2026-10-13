@@ -4,7 +4,7 @@ import { mapTermsToMaster } from '../services/ai';
 import { db, Product, QuarterlyAeMonitor } from '../services/db';
 import { settings } from '../services/settings';
 import { formatCI } from '../services/stats';
-import { AppMode, ExtractedMaster } from '../types';
+import { AppMode } from '../types';
 import { openPrintReport } from './printReport';
 import { aggregateSignals } from '../services/literature/signals';
 import { DB_KEY as LIT_DB_KEY, loadRecordsSync } from '../services/literature/storage';
@@ -14,8 +14,6 @@ import { Activity, Calculator, BarChart3, Plus, Trash2, ToggleRight, ToggleLeft,
 interface CountRow { term: string; count: string; serious: boolean; }
 
 interface MonitorModeProps {
-  masterResult: ExtractedMaster | null;
-  setMasterResult: (m: ExtractedMaster | null) => void;
   savedProducts: Product[];
   selectedProductId: string;
   setSelectedProductId: (id: string) => void;
@@ -24,12 +22,23 @@ interface MonitorModeProps {
 }
 
 export const MonitorMode = React.memo(({
-  masterResult, setMasterResult,
   savedProducts,
   selectedProductId, setSelectedProductId,
   setDbUpdateTrigger,
   setActiveMode
 }: MonitorModeProps) => {
+  // 分析一律用「目前選的產品」已存的主檔，不用 App 共用的 masterResult：
+  //   • 從監測總覽點產品進來時只帶 selectedProductId，共用的主檔可能是空的（按鈕按不下去），
+  //     或還是上一個產品的（拿 A 的主檔分析 B、再存到 B 底下）。
+  //   • masterResult 是主檔產生頁的編輯暫存，這裡不讀也不寫，免得互相蓋掉。
+  // 產品已不存在（被刪除）時視同未選。
+  const masterResult = useMemo(
+    () => (savedProducts.some((p) => p.product_id === selectedProductId)
+      ? db.getMasterForAnalysis(selectedProductId)
+      : null),
+    [savedProducts, selectedProductId],
+  );
+
   const [selYear, setSelYear] = useState(new Date().getFullYear().toString());
   const [selQ, setSelQ] = useState('Q1');
   const quarter = `${selYear}${selQ}`;
@@ -87,12 +96,8 @@ export const MonitorMode = React.memo(({
     const pid = e.target.value;
     setSelectedProductId(pid);
     if (pid) {
-      const analysisFormat = db.getMasterForAnalysis(pid);
-      setMasterResult(analysisFormat);
       setAnalysisReport(null);
       setMonitorSaveStatus('idle');
-    } else {
-      setMasterResult(null);
     }
   };
 
