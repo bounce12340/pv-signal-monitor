@@ -194,8 +194,6 @@ export default function App() {
 
         {activeMode === 'monitor' && (
           <MonitorMode
-            masterResult={masterResult}
-            setMasterResult={setMasterResult}
             savedProducts={savedProducts}
             selectedProductId={selectedProductId}
             setSelectedProductId={setSelectedProductId}
