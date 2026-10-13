@@ -9,7 +9,7 @@ vi.mock('./storage', () => ({
   },
 }));
 
-import { settings, DEFAULT_AI_SETTINGS } from './settings';
+import { settings, DEFAULT_AI_SETTINGS, DEFAULT_LIT_SEARCH, LEGACY_DEFAULT_AE_TERMS } from './settings';
 
 describe('settings.getAi retired-model healing', () => {
   beforeEach(() => kv.clear());
@@ -65,9 +65,10 @@ describe('settings.getLitSearch persistence', () => {
       dateFrom: '2025-06-01',
       dateTo: '2025-12-31',
       maxResults: 250,
+      useMesh: false,
     });
     const c = settings.getLitSearch();
-    expect(c).toMatchObject({ aeTerms: 'hepatotoxicity', maxResults: 250, dateFrom: '2025-06-01' });
+    expect(c).toMatchObject({ aeTerms: 'hepatotoxicity', maxResults: 250, dateFrom: '2025-06-01', useMesh: false });
   });
 
   it('部分欄位缺漏時以預設補齊', () => {
@@ -75,5 +76,19 @@ describe('settings.getLitSearch persistence', () => {
     const c = settings.getLitSearch();
     expect(c.maxResults).toBe(50);
     expect(c.exclusions).toBe('animal-only');
+    expect(c.useMesh).toBe(true); // 舊設定沒有這個欄位：預設開啟
+  });
+
+  it('仍是舊版預設 AE 關鍵字的設定，換成新預設；其他欄位不動', () => {
+    kv.set('pv_settings_lit_search', { aeTerms: LEGACY_DEFAULT_AE_TERMS, maxResults: 80 });
+    const c = settings.getLitSearch();
+    expect(c.aeTerms).toBe(DEFAULT_LIT_SEARCH.aeTerms);
+    expect(c.aeTerms).toContain('"adverse event*"');
+    expect(c.maxResults).toBe(80);
+  });
+
+  it('使用者改過的 AE 關鍵字不會被換掉', () => {
+    kv.set('pv_settings_lit_search', { aeTerms: 'Adverse drug reactions, hepatotoxicity' });
+    expect(settings.getLitSearch().aeTerms).toBe('Adverse drug reactions, hepatotoxicity');
   });
 });

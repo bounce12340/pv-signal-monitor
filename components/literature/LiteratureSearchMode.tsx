@@ -25,6 +25,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
   const [dateFrom, setDateFrom] = useState(persisted.dateFrom);
   const [dateTo, setDateTo] = useState(persisted.dateTo);
   const [maxResults, setMaxResults] = useState(persisted.maxResults);
+  const [useMesh, setUseMesh] = useState(persisted.useMesh);
 
   useEffect(() => {
     settings.saveLitSearch({
@@ -33,8 +34,9 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
       dateFrom,
       dateTo,
       maxResults,
+      useMesh,
     });
-  }, [aeTermsText, exclusionsText, dateFrom, dateTo, maxResults]);
+  }, [aeTermsText, exclusionsText, dateFrom, dateTo, maxResults, useMesh]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
@@ -47,17 +49,18 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
     ingredients: parseTermList(ingredientsText),
     aeTerms: parseTermList(aeTermsText),
     exclusions: parseTermList(exclusionsText),
-  }), [ingredientsText, aeTermsText, exclusionsText]);
+    useMesh,
+  }), [ingredientsText, aeTermsText, exclusionsText, useMesh]);
   const previewQuery = parsed.ingredients.length > 0 ? buildPubMedQuery(parsed) : '';
 
   const handleRun = async () => {
-    const { ingredients, aeTerms, exclusions } = parsed;
+    const { ingredients } = parsed;
     if (ingredients.length === 0) {
       setError('請輸入至少一個目標成分');
       return;
     }
     const ingredientLabel = ingredients.join(', ');
-    const query = buildPubMedQuery({ ingredients, aeTerms, exclusions });
+    const query = buildPubMedQuery(parsed);
     const windowLabel = `${dateFrom}～${dateTo}（PubMed 收錄日期 edat）`;
 
     setIsProcessing(true);
@@ -65,7 +68,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
     setLastRun(null);
     try {
       setProgress({ label: '檢索 PubMed 中...', done: 0, total: 0 });
-      const { total, articles: raw } = await performPubMedSearch(query, ingredientLabel, { from: dateFrom, to: dateTo }, maxResults);
+      const { total, articles: raw, notFound } = await performPubMedSearch(query, ingredientLabel, { from: dateFrom, to: dateTo }, maxResults);
 
       const master = loadRecordsSync<PVRecord>(DB_KEY);
       const existingPending = loadRecordsSync<PVRecord>(PENDING_KEY);
@@ -92,7 +95,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
       );
       const freshRecords = rawRecords.filter((r) => !inLibrary.includes(r) && !inPending.includes(r));
       const outcome = (added: number) => describeSearchOutcome({
-        total, retrieved: raw.length, inLibrary: inLibrary.length, inPending: inPending.length, added,
+        total, retrieved: raw.length, inLibrary: inLibrary.length, inPending: inPending.length, added, notFound,
       });
       const logRun = (summary: string) => db.addLog(
         'CREATE', 'LITERATURE',
@@ -206,6 +209,23 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
               onChange={(e) => setAeTermsText(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
             />
+          </div>
+          <div className="lg:col-span-2">
+            <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useMesh}
+                onChange={(e) => setUseMesh(e.target.checked)}
+                className="mt-0.5 accent-brand-600"
+              />
+              <span>
+                <span className="font-medium">加入 MeSH 主題詞（建議開啟）</span>
+                <span className="block text-xs text-slate-600">
+                  AE 條件另外接受 ADR 相關主題詞，並加入各成分的「adverse effects」副標題（排除純動物研究）。只會多找、不會少找；
+                  剛收錄的文章多半還沒標 MeSH，所以仍以上方關鍵字為主。
+                </span>
+              </span>
+            </label>
           </div>
           <div className="space-y-2 lg:col-span-2">
             <label className="block text-sm font-medium text-slate-700">排除詞（以逗號、頓號或分號分隔）</label>

@@ -97,7 +97,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 37 test files / 481 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 37 test files / 488 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 

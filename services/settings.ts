@@ -51,14 +51,24 @@ export interface LitSearchConfig {
   dateFrom: string;
   dateTo: string;
   maxResults: number;
+  /** 檢索式是否加入 ADR 相關 MeSH 主題詞與成分的 adverse effects 副標題（見 pubmed.ts buildPubMedQuery）。 */
+  useMesh: boolean;
 }
 
+/**
+ * 舊版預設的 AE 關鍵字。「"Adverse drug reactions"」是加引號的複數整句，"adverse event"、
+ * "FAERS" 這類寫法都比不到；仍是這個值的設定，讀取時換成新預設（使用者改過的不動）。
+ */
+export const LEGACY_DEFAULT_AE_TERMS = 'Adverse drug reactions, pharmacovigilance*';
+
 export const DEFAULT_LIT_SEARCH: LitSearchConfig = {
-  aeTerms: 'Adverse drug reactions, pharmacovigilance*',
+  // 多字詞帶 * 時加雙引號，PubMed 才會當成片語截字；不加會拆成單字分別比對。
+  aeTerms: '"adverse drug reaction*", "adverse event*", pharmacovigilance*, FAERS, VigiBase, "spontaneous report*", disproportionality, "case report*"',
   exclusions: 'animal-only',
   dateFrom: `${new Date().getFullYear()}-01-01`,
   dateTo: `${new Date().getFullYear()}-12-31`,
   maxResults: 100,
+  useMesh: true,
 };
 
 const AI_KEY = 'pv_settings_ai';
@@ -87,6 +97,9 @@ export const settings = {
   getRules: (): SignalRuleConfig => load(RULES_KEY, DEFAULT_RULE_CONFIG),
   saveRules: (r: SignalRuleConfig) => save(RULES_KEY, r),
 
-  getLitSearch: (): LitSearchConfig => load(LIT_SEARCH_KEY, DEFAULT_LIT_SEARCH),
+  getLitSearch: (): LitSearchConfig => {
+    const c = load(LIT_SEARCH_KEY, DEFAULT_LIT_SEARCH);
+    return c.aeTerms === LEGACY_DEFAULT_AE_TERMS ? { ...c, aeTerms: DEFAULT_LIT_SEARCH.aeTerms } : c;
+  },
   saveLitSearch: (c: LitSearchConfig) => save(LIT_SEARCH_KEY, c),
 };

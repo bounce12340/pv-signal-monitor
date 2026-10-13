@@ -33,7 +33,20 @@ export interface PubMedQueryInput {
   ingredients: string[];
   aeTerms: string[];
   exclusions: string[];
+  /** Widen the AE condition with MeSH (see buildPubMedQuery). Default off. */
+  useMesh?: boolean;
 }
+
+/**
+ * ADR-related MeSH descriptors OR'd into the AE condition when useMesh is on.
+ * They catch indexed articles whose wording matches none of the keywords.
+ */
+export const AE_MESH_TERMS = [
+  'Drug-Related Side Effects and Adverse Reactions',
+  'Adverse Drug Reaction Reporting Systems',
+  'Pharmacovigilance',
+  'Product Surveillance, Postmarketing',
+];
 
 /**
  * Assemble a PubMed boolean query string from the search form's parsed
@@ -41,13 +54,33 @@ export interface PubMedQueryInput {
  * themselves), exclusions NOT'd out. A term containing `*` (truncation) or
  * `"` (an explicit phrase) is passed through unquoted; everything else is
  * wrapped in quotes as an exact phrase.
+ *
+ * useMesh only ever adds hits, never removes keyword hits:
+ *   • the AE condition also accepts AE_MESH_TERMS;
+ *   • each ingredient's "<name>/adverse effects" MeSH subheading is OR'd in as
+ *     its own branch — the standard PubMed handle for a drug's ADR literature.
+ *     That branch alone excludes animal-only studies, because the subheading is
+ *     also used for e.g. pilocarpine-induced seizure models.
+ * MeSH only covers indexed articles (indexing lags weeks to months), so the
+ * keywords still carry the newest ones. An ingredient that is not a MeSH
+ * descriptor is reported back by PubMed as not found and ignored (see
+ * performPubMedSearch's notFound). With no AE terms there is no AE condition
+ * to widen, so useMesh is ignored and the search stays ingredient-only.
  */
-export function buildPubMedQuery({ ingredients, aeTerms, exclusions }: PubMedQueryInput): string {
+export function buildPubMedQuery({ ingredients, aeTerms, exclusions, useMesh = false }: PubMedQueryInput): string {
   const quote = (t: string) => (/[*"]/.test(t) ? t : `"${t}"`);
-  const ingredientsClause = ingredients.map((i) => `("${i}")`).join(' OR ');
-  const aeClause = aeTerms.length > 0 ? ` AND (${aeTerms.map(quote).join(' OR ')})` : '';
+  const ingredientsClause = `(${ingredients.map((i) => `("${i}")`).join(' OR ')})`;
   const exclusionClause = exclusions.map((t) => ` NOT (${quote(t)})`).join('');
-  return `(${ingredientsClause})${aeClause}${exclusionClause}`;
+  if (aeTerms.length === 0) return `${ingredientsClause}${exclusionClause}`;
+
+  const aeParts = aeTerms.map(quote);
+  if (!useMesh) return `${ingredientsClause} AND (${aeParts.join(' OR ')})${exclusionClause}`;
+
+  const meshAe = AE_MESH_TERMS.map((m) => `"${m}"[MeSH Terms]`);
+  const subheadings = ingredients.map((i) => `"${i}/adverse effects"[MeSH Terms]`).join(' OR ');
+  const humanOnly = '("animals"[MeSH Terms] NOT "humans"[MeSH Terms])';
+  return `((${ingredientsClause} AND (${[...aeParts, ...meshAe].join(' OR ')}))` +
+    ` OR ((${subheadings}) NOT ${humanOnly}))${exclusionClause}`;
 }
 
 export interface PubMedSearchResult {
@@ -55,6 +88,8 @@ export interface PubMedSearchResult {
   total: number;
   /** Retrieved records, at most maxResults. */
   articles: any[];
+  /** Terms PubMed could not find and silently dropped from the query. */
+  notFound: string[];
 }
 
 /**
@@ -82,7 +117,9 @@ export async function performPubMedSearch(
   const searchData = await searchRes.json();
   const pmids: string[] = searchData.esearchresult?.idlist || [];
   const total = Number(searchData.esearchresult?.count) || pmids.length;
-  if (pmids.length === 0) return { total, articles: [] };
+  const warnings = searchData.esearchresult?.warninglist || {};
+  const notFound: string[] = [...(warnings.quotedphrasesnotfound || []), ...(warnings.phrasesignored || [])];
+  if (pmids.length === 0) return { total, articles: [], notFound };
 
   // 2. efetch in pages (EFETCH_CHUNK per call), pausing between pages.
   const results: any[] = [];
@@ -95,7 +132,7 @@ export async function performPubMedSearch(
     const xmlText = await fetchRes.text();
     results.push(...parseArticles(xmlText));
   }
-  return { total, articles: results };
+  return { total, articles: results, notFound };
 }
 
 export interface SearchOutcome {
@@ -109,6 +146,8 @@ export interface SearchOutcome {
   inPending: number;
   /** Records added to the review queue this run. */
   added: number;
+  /** Terms PubMed could not find and ignored. */
+  notFound?: string[];
 }
 
 /**
@@ -125,6 +164,9 @@ export function describeSearchOutcome(o: SearchOutcome): string {
   if (o.inPending > 0) parts.push(`已在待核閱 ${o.inPending} 筆（略過）`);
   parts.push(o.added > 0 ? `新增 ${o.added} 筆至待核閱` : '沒有新文獻需要核閱');
   if (o.total === 0) parts.push('請確認成分拼字、AE 關鍵字、排除詞與監測期間');
+  if (o.notFound && o.notFound.length > 0) {
+    parts.push(`PubMed 查無下列詞、已略過：${o.notFound.join('、')}（成分不是 MeSH 主題詞時屬正常，仍以關鍵字比對）`);
+  }
   return parts.join('；') + '。';
 }
 
