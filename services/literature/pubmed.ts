@@ -17,6 +17,18 @@ function ncbiPause(): Promise<void> {
   return new Promise((r) => setTimeout(r, NCBI_API_KEY ? 110 : 350));
 }
 
+/**
+ * Split a search-form field into trimmed, non-empty terms.
+ *
+ * Accepts the separators people actually type, not just the ASCII comma: a
+ * Chinese input method produces 「，」 or 「、」, and pasted lists bring
+ * semicolons or newlines. Anything else used to reach PubMed as one long
+ * quoted "drug name" and silently returned 0 hits.
+ */
+export function parseTermList(s: string): string[] {
+  return s.split(/[,，、;；\r\n]+/).map((t) => t.trim()).filter(Boolean);
+}
+
 export interface PubMedQueryInput {
   ingredients: string[];
   aeTerms: string[];
@@ -38,6 +50,13 @@ export function buildPubMedQuery({ ingredients, aeTerms, exclusions }: PubMedQue
   return `(${ingredientsClause})${aeClause}${exclusionClause}`;
 }
 
+export interface PubMedSearchResult {
+  /** Total hits PubMed reports for the query (may exceed what was retrieved). */
+  total: number;
+  /** Retrieved records, at most maxResults. */
+  articles: any[];
+}
+
 /**
  * Precise, reproducible PubMed search via NCBI E-utilities.
  * maxResults: max records returned (paged; default 100).
@@ -47,7 +66,7 @@ export async function performPubMedSearch(
   _ingredient: string,
   dateWindow: { from: string; to: string },
   maxResults = 100
-): Promise<any[]> {
+): Promise<PubMedSearchResult> {
   // 1. esearch → PMIDs (up to maxResults).
   // datetype=edat filters by the date the article was *added to PubMed* (Entrez
   // date), always precise to the day — the right basis for "what newly appeared
@@ -62,7 +81,8 @@ export async function performPubMedSearch(
   if (!searchRes.ok) throw new Error(`PubMed esearch 失敗 (HTTP ${searchRes.status})`);
   const searchData = await searchRes.json();
   const pmids: string[] = searchData.esearchresult?.idlist || [];
-  if (pmids.length === 0) return [];
+  const total = Number(searchData.esearchresult?.count) || pmids.length;
+  if (pmids.length === 0) return { total, articles: [] };
 
   // 2. efetch in pages (EFETCH_CHUNK per call), pausing between pages.
   const results: any[] = [];
@@ -75,7 +95,37 @@ export async function performPubMedSearch(
     const xmlText = await fetchRes.text();
     results.push(...parseArticles(xmlText));
   }
-  return results;
+  return { total, articles: results };
+}
+
+export interface SearchOutcome {
+  /** Hits PubMed reports for the query. */
+  total: number;
+  /** Records actually retrieved (capped by 最多取回筆數). */
+  retrieved: number;
+  /** Retrieved records skipped because they are already in the library. */
+  inLibrary: number;
+  /** Retrieved records skipped because they are already awaiting review. */
+  inPending: number;
+  /** Records added to the review queue this run. */
+  added: number;
+}
+
+/**
+ * One-line, user-facing account of a search run. Every retrieved record is
+ * accounted for (already in the library, already pending, or newly added), so a
+ * low count on the review page can be traced back to its cause.
+ */
+export function describeSearchOutcome(o: SearchOutcome): string {
+  const parts = [`PubMed 共 ${o.total} 筆`];
+  if (o.retrieved < o.total) {
+    parts.push(`⚠️ 只取回前 ${o.retrieved} 筆（受「最多取回筆數」限制），其餘未納入`);
+  }
+  if (o.inLibrary > 0) parts.push(`已在正式庫 ${o.inLibrary} 筆（略過）`);
+  if (o.inPending > 0) parts.push(`已在待核閱 ${o.inPending} 筆（略過）`);
+  parts.push(o.added > 0 ? `新增 ${o.added} 筆至待核閱` : '沒有新文獻需要核閱');
+  if (o.total === 0) parts.push('請確認成分拼字、AE 關鍵字、排除詞與監測期間');
+  return parts.join('；') + '。';
 }
 
 /** Parse the efetch XML into article fields. */

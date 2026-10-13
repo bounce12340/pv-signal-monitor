@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AppMode } from '../../types';
 import type { PVRecord } from '../../services/literature/types';
-import { buildPubMedQuery, performPubMedSearch } from '../../services/literature/pubmed';
+import { buildPubMedQuery, describeSearchOutcome, parseTermList, performPubMedSearch } from '../../services/literature/pubmed';
 import { PVLLMService } from '../../services/literature/llmService';
 import { DB_KEY, PENDING_KEY, loadRecordsSync, saveRecords } from '../../services/literature/storage';
 import { db } from '../../services/db';
@@ -14,9 +14,6 @@ interface LiteratureSearchModeProps {
   setActiveMode: (m: AppMode) => void;
   setDbUpdateTrigger: React.Dispatch<React.SetStateAction<number>>;
 }
-
-// Comma-separated free-text field -> trimmed, non-empty terms.
-const parseList = (s: string): string[] => s.split(',').map((t) => t.trim()).filter(Boolean);
 
 export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrigger }: LiteratureSearchModeProps) => {
   // Search criteria persist across rounds and sessions (services/settings.ts);
@@ -42,25 +39,33 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [resultMsg, setResultMsg] = useState<string | null>(null);
+  // 上一次實際送出的檢索與結果；檢索式留在畫面上，之後改了欄位也看得到當時送了什麼。
+  const [lastRun, setLastRun] = useState<{ query: string; summary: string; added: number } | null>(null);
+
+  // 依目前欄位組出的檢索式，執行前就看得到——分隔符號打錯、成分被併成一個時，在這裡就會發現。
+  const parsed = useMemo(() => ({
+    ingredients: parseTermList(ingredientsText),
+    aeTerms: parseTermList(aeTermsText),
+    exclusions: parseTermList(exclusionsText),
+  }), [ingredientsText, aeTermsText, exclusionsText]);
+  const previewQuery = parsed.ingredients.length > 0 ? buildPubMedQuery(parsed) : '';
 
   const handleRun = async () => {
-    const ingredients = parseList(ingredientsText);
+    const { ingredients, aeTerms, exclusions } = parsed;
     if (ingredients.length === 0) {
       setError('請輸入至少一個目標成分');
       return;
     }
-    const aeTerms = parseList(aeTermsText);
-    const exclusions = parseList(exclusionsText);
     const ingredientLabel = ingredients.join(', ');
     const query = buildPubMedQuery({ ingredients, aeTerms, exclusions });
+    const windowLabel = `${dateFrom}～${dateTo}（PubMed 收錄日期 edat）`;
 
     setIsProcessing(true);
     setError(null);
-    setResultMsg(null);
+    setLastRun(null);
     try {
       setProgress({ label: '檢索 PubMed 中...', done: 0, total: 0 });
-      const raw = await performPubMedSearch(query, ingredientLabel, { from: dateFrom, to: dateTo }, maxResults);
+      const { total, articles: raw } = await performPubMedSearch(query, ingredientLabel, { from: dateFrom, to: dateTo }, maxResults);
 
       const master = loadRecordsSync<PVRecord>(DB_KEY);
       const existingPending = loadRecordsSync<PVRecord>(PENDING_KEY);
@@ -80,21 +85,32 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
         original_search_term: ingredientLabel,
       }));
       // 排除已在正式庫的文獻；已在待核閱清單者也不重複加入（保留使用者尚未核閱的舊項目）。
-      const freshRecords = rawRecords.filter(
-        (r) => !master.some((m) => m.pmid === r.pmid) && !existingPending.some((p) => p.pmid === r.pmid)
+      // 兩種略過分開計數，結果訊息才交代得清每一筆的去向。
+      const inLibrary = rawRecords.filter((r) => master.some((m) => m.pmid === r.pmid));
+      const inPending = rawRecords.filter(
+        (r) => !master.some((m) => m.pmid === r.pmid) && existingPending.some((p) => p.pmid === r.pmid)
+      );
+      const freshRecords = rawRecords.filter((r) => !inLibrary.includes(r) && !inPending.includes(r));
+      const outcome = (added: number) => describeSearchOutcome({
+        total, retrieved: raw.length, inLibrary: inLibrary.length, inPending: inPending.length, added,
+      });
+      const logRun = (summary: string) => db.addLog(
+        'CREATE', 'LITERATURE',
+        `PubMed 檢索：成分 ${ingredientLabel}；期間 ${windowLabel}；檢索式 ${query}；${summary}`
       );
 
       if (freshRecords.length === 0) {
-        setResultMsg(`找到 ${raw.length} 筆，扣除已存在（正式庫/待核閱）後無新文獻需要核閱。`);
-        db.addLog('CREATE', 'LITERATURE', `PubMed 檢索：成分 ${ingredientLabel}，找到 ${raw.length} 筆，無新文獻`);
+        const summary = outcome(0);
+        setLastRun({ query, summary, added: 0 });
+        logRun(summary);
         return;
       }
 
-      const total = freshRecords.length;
+      const toProcess = freshRecords.length;
       let scoreDone = 0;
       let sumDone = 0;
       const bump = () =>
-        setProgress({ label: 'AI 評分與摘要中...', done: scoreDone + sumDone, total: total * 2 });
+        setProgress({ label: 'AI 評分與摘要中...', done: scoreDone + sumDone, total: toProcess * 2 });
       bump();
       const [scores, summaries] = await Promise.all([
         llm.scoreRelevance(freshRecords, 'zh', (d) => { scoreDone = d; bump(); }),
@@ -115,13 +131,11 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
 
       const newPending = [...existingPending, ...finalized];
       saveRecords(PENDING_KEY, newPending);
-      db.addLog(
-        'CREATE', 'LITERATURE',
-        `PubMed 檢索：成分 ${ingredientLabel}，找到 ${raw.length} 筆，新增待核閱 ${finalized.length} 筆`
-      );
+      const summary = outcome(finalized.length);
+      logRun(summary);
       setDbUpdateTrigger((prev) => prev + 1);
-      setResultMsg(`找到 ${raw.length} 筆，新增 ${finalized.length} 筆至待核閱清單，前往核閱頁。`);
-      setActiveMode('litReview');
+      // 不再自動跳到核閱頁：先讓使用者看到這一輪每一筆的去向，再自己前往。
+      setLastRun({ query, summary, added: finalized.length });
     } catch (e) {
       setError(e instanceof Error ? e.message : '檢索或 AI 處理發生未知錯誤');
     } finally {
@@ -145,7 +159,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
 
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">目標成分（逗號分隔）</label>
+            <label className="block text-sm font-medium text-slate-700">目標成分（以逗號、頓號或分號分隔）</label>
             <input
               type="text"
               value={ingredientsText}
@@ -185,7 +199,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
             />
           </div>
           <div className="space-y-2 lg:col-span-2">
-            <label className="block text-sm font-medium text-slate-700">AE 關鍵字（逗號分隔，支援萬用字元 *）</label>
+            <label className="block text-sm font-medium text-slate-700">AE 關鍵字（以逗號、頓號或分號分隔，支援萬用字元 *；多字詞加 * 時請加雙引號，如 "adverse event*"）</label>
             <input
               type="text"
               value={aeTermsText}
@@ -194,7 +208,7 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
             />
           </div>
           <div className="space-y-2 lg:col-span-2">
-            <label className="block text-sm font-medium text-slate-700">排除詞（逗號分隔）</label>
+            <label className="block text-sm font-medium text-slate-700">排除詞（以逗號、頓號或分號分隔）</label>
             <input
               type="text"
               value={exclusionsText}
@@ -203,6 +217,16 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
             />
           </div>
         </div>
+
+        {previewQuery && (
+          <div className="mt-6 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <div className="text-xs font-semibold text-slate-600">
+              將送出的 PubMed 檢索式（已辨識 {parsed.ingredients.length} 個成分）
+            </div>
+            <code data-testid="query-preview" className="block mt-1 text-xs font-mono text-slate-800 break-all select-all">{previewQuery}</code>
+            <div className="mt-1 text-xs text-slate-600">期間：{dateFrom}～{dateTo}，依 PubMed 收錄日期（edat）篩選</div>
+          </div>
+        )}
 
         {progress && (
           <div className="mt-6 flex items-center gap-3">
@@ -233,8 +257,21 @@ export const LiteratureSearchMode = React.memo(({ setActiveMode, setDbUpdateTrig
             <AlertCircle size={16} />{error}
           </div>
         )}
-        {resultMsg && !error && (
-          <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{resultMsg}</div>
+        {lastRun && !error && (
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm space-y-2">
+            <p data-testid="search-summary" className="text-green-800">{lastRun.summary}</p>
+            <div className="text-xs text-slate-600">
+              本次送出的檢索式：<code className="font-mono break-all select-all text-slate-800">{lastRun.query}</code>
+            </div>
+            {lastRun.added > 0 && (
+              <button
+                onClick={() => setActiveMode('litReview')}
+                className="px-4 py-2 bg-brand-700 hover:bg-brand-800 text-white rounded-lg text-sm font-medium"
+              >
+                前往核閱（新增 {lastRun.added} 筆）
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

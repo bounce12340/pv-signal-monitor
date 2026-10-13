@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPubMedQuery, resolveMonth } from './pubmed';
+import { buildPubMedQuery, describeSearchOutcome, parseTermList, resolveMonth } from './pubmed';
 
 describe('buildPubMedQuery', () => {
   it('wraps a single ingredient in a parenthesised phrase group', () => {
@@ -71,5 +71,50 @@ describe('resolveMonth', () => {
     expect(resolveMonth('')).toBe('');
     expect(resolveMonth(undefined)).toBe('');
     expect(resolveMonth('n/a')).toBe('');
+  });
+});
+
+describe('parseTermList', () => {
+  it('splits on ASCII and full-width commas, the ideographic comma, semicolons and newlines', () => {
+    expect(parseTermList('Pravastatin, Fenofibrate')).toEqual(['Pravastatin', 'Fenofibrate']);
+    expect(parseTermList('Pravastatin，Fenofibrate、Diltiazem')).toEqual(['Pravastatin', 'Fenofibrate', 'Diltiazem']);
+    expect(parseTermList('Trospium; Pilocarpine；Theophylline\nPravastatin')).toEqual([
+      'Trospium', 'Pilocarpine', 'Theophylline', 'Pravastatin',
+    ]);
+  });
+
+  it('drops empty entries and surrounding whitespace', () => {
+    expect(parseTermList(' , Fenofibrate ,, ， ')).toEqual(['Fenofibrate']);
+    expect(parseTermList('')).toEqual([]);
+  });
+
+  it('keeps a multi-word term, its wildcard and its quotes intact', () => {
+    expect(parseTermList('"adverse event*", pharmacovigilance*、Adverse drug reactions')).toEqual([
+      '"adverse event*"', 'pharmacovigilance*', 'Adverse drug reactions',
+    ]);
+  });
+});
+
+describe('describeSearchOutcome', () => {
+  const base = { total: 5, retrieved: 5, inLibrary: 0, inPending: 0, added: 5 };
+
+  it('accounts for every retrieved record', () => {
+    expect(describeSearchOutcome({ ...base, inLibrary: 1, inPending: 3, added: 1 })).toBe(
+      'PubMed 共 5 筆；已在正式庫 1 筆（略過）；已在待核閱 3 筆（略過）；新增 1 筆至待核閱。'
+    );
+  });
+
+  it('warns when the retrieval cap cut the result short', () => {
+    expect(describeSearchOutcome({ ...base, total: 250, retrieved: 100, added: 100 })).toContain(
+      '只取回前 100 筆'
+    );
+    expect(describeSearchOutcome(base)).not.toContain('只取回');
+  });
+
+  it('says so when nothing is new, and hints at the inputs when PubMed found nothing', () => {
+    expect(describeSearchOutcome({ ...base, inPending: 5, added: 0 })).toContain('沒有新文獻需要核閱');
+    expect(describeSearchOutcome({ total: 0, retrieved: 0, inLibrary: 0, inPending: 0, added: 0 })).toBe(
+      'PubMed 共 0 筆；沒有新文獻需要核閱；請確認成分拼字、AE 關鍵字、排除詞與監測期間。'
+    );
   });
 });
