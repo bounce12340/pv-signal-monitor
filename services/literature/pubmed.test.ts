@@ -118,3 +118,35 @@ describe('describeSearchOutcome', () => {
     );
   });
 });
+
+describe('buildPubMedQuery with useMesh', () => {
+  it('widens the AE condition with MeSH and adds each ingredient\'s adverse-effects subheading, human only', () => {
+    expect(
+      buildPubMedQuery({ ingredients: ['Drug A', 'Drug B'], aeTerms: ['"adverse event*"'], exclusions: ['animal-only'], useMesh: true })
+    ).toBe(
+      '(((("Drug A") OR ("Drug B")) AND ("adverse event*" OR ' +
+        '"Drug-Related Side Effects and Adverse Reactions"[MeSH Terms] OR "Adverse Drug Reaction Reporting Systems"[MeSH Terms] OR ' +
+        '"Pharmacovigilance"[MeSH Terms] OR "Product Surveillance, Postmarketing"[MeSH Terms]))' +
+        ' OR (("Drug A/adverse effects"[MeSH Terms] OR "Drug B/adverse effects"[MeSH Terms])' +
+        ' NOT ("animals"[MeSH Terms] NOT "humans"[MeSH Terms]))) NOT ("animal-only")'
+    );
+  });
+
+  it('keeps the keyword-only query byte-for-byte when MeSH is off', () => {
+    const input = { ingredients: ['Drug'], aeTerms: ['AE'], exclusions: ['x'] };
+    expect(buildPubMedQuery({ ...input, useMesh: false })).toBe(buildPubMedQuery(input));
+    expect(buildPubMedQuery(input)).toBe('(("Drug")) AND ("AE") NOT ("x")');
+  });
+
+  it('leaves an ingredient-only search (no AE terms) unrestricted even with MeSH on', () => {
+    expect(buildPubMedQuery({ ingredients: ['Drug'], aeTerms: [], exclusions: [], useMesh: true })).toBe('(("Drug"))');
+  });
+});
+
+describe('describeSearchOutcome notFound', () => {
+  it('names the terms PubMed ignored', () => {
+    expect(
+      describeSearchOutcome({ total: 3, retrieved: 3, inLibrary: 0, inPending: 0, added: 3, notFound: ['"Trospium/adverse effects"[MeSH Terms]'] })
+    ).toContain('PubMed 查無下列詞、已略過："Trospium/adverse effects"[MeSH Terms]');
+  });
+});

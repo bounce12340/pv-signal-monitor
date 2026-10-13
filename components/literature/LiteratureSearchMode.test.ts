@@ -6,6 +6,8 @@ import React, { act } from 'react';
 import { render, settle } from '../ae/testRender';
 import { PENDING_KEY, saveRecords } from '../../services/literature/storage';
 import { db } from '../../services/db';
+import { DEFAULT_LIT_SEARCH, settings } from '../../services/settings';
+import { buildPubMedQuery, parseTermList } from '../../services/literature/pubmed';
 import { LiteratureSearchMode } from './LiteratureSearchMode';
 
 vi.mock('../../services/literature/llmService', () => ({
@@ -27,7 +29,10 @@ function stubPubMed() {
     const url = String(input);
     requested.push(url);
     if (url.includes('esearch.fcgi')) {
-      return new Response(JSON.stringify({ esearchresult: { count: '7', idlist: ['1', '2', '3'] } }));
+      return new Response(JSON.stringify({ esearchresult: {
+        count: '7', idlist: ['1', '2', '3'],
+        warninglist: { quotedphrasesnotfound: ['"Fenofibrate/adverse effects"[MeSH Terms]'] },
+      } }));
     }
     return new Response(`<PubmedArticleSet>${['1', '2', '3'].map(article).join('')}</PubmedArticleSet>`);
   }));
@@ -61,6 +66,8 @@ beforeEach(() => {
   // PMID 2 is already awaiting review from an earlier round.
   saveRecords(PENDING_KEY, [{ id: '2', pmid: '2', source: 'pubmed', title: 'Earlier', relevance_score: 50 }] as any);
   stubPubMed();
+  // storage.ts keeps an in-memory cache across tests; start every test from the default criteria.
+  settings.saveLitSearch({ ...DEFAULT_LIT_SEARCH });
 });
 afterEach(() => { ui?.unmount(); ui = null; vi.unstubAllGlobals(); });
 
@@ -79,6 +86,18 @@ describe('LiteratureSearchMode', () => {
     expect(ui!.text()).toContain('已辨識 3 個成分');
   });
 
+  it('adds MeSH by default, and the checkbox takes it out of the query', async () => {
+    const ingredients = await mount();
+    await type(ingredients, 'Pravastatin');
+    expect(preview()).toContain('"Pravastatin/adverse effects"[MeSH Terms]');
+    expect(preview()).toContain('"adverse event*"');
+    const mesh = [...ui!.host.querySelectorAll('input[type="checkbox"]')]
+      .find((c) => c.closest('label')?.textContent?.includes('MeSH')) as HTMLInputElement;
+    expect(mesh.checked).toBe(true);
+    await act(async () => { mesh.click(); });
+    expect(preview()).not.toContain('[MeSH Terms]');
+  });
+
   it('accounts for every record, keeps the sent query on screen and logs it', async () => {
     const ingredients = await mount();
     await type(ingredients, 'Pravastatin，Fenofibrate');
@@ -89,10 +108,18 @@ describe('LiteratureSearchMode', () => {
     expect(esearch).toContain('("Pravastatin") OR ("Fenofibrate")');
 
     expect(summary()).toBe(
-      'PubMed 共 7 筆；⚠️ 只取回前 3 筆（受「最多取回筆數」限制），其餘未納入；已在待核閱 1 筆（略過）；新增 2 筆至待核閱。'
+      'PubMed 共 7 筆；⚠️ 只取回前 3 筆（受「最多取回筆數」限制），其餘未納入；已在待核閱 1 筆（略過）；新增 2 筆至待核閱；' +
+      'PubMed 查無下列詞、已略過："Fenofibrate/adverse effects"[MeSH Terms]（成分不是 MeSH 主題詞時屬正常，仍以關鍵字比對）。'
     );
     expect(ui!.text()).toContain('本次送出的檢索式');
-    expect(db.getLogs()[0].description).toContain('檢索式 (("Pravastatin") OR ("Fenofibrate"))');
+    const sent = buildPubMedQuery({
+      ingredients: ['Pravastatin', 'Fenofibrate'],
+      aeTerms: parseTermList(DEFAULT_LIT_SEARCH.aeTerms),
+      exclusions: parseTermList(DEFAULT_LIT_SEARCH.exclusions),
+      useMesh: true,
+    });
+    expect(esearch).toContain(sent);
+    expect(db.getLogs()[0].description).toContain(`檢索式 ${sent}；`);
 
     // No automatic jump: the summary stays visible until the user chooses to go.
     expect(setActiveMode).not.toHaveBeenCalled();
