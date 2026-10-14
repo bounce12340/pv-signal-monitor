@@ -206,7 +206,7 @@ export const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: (
           <button
             onClick={handleSave}
             className={`px-5 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${
-              saved ? 'bg-green-100 text-green-700' : 'bg-brand-600 text-white hover:bg-brand-700'
+              saved ? 'bg-green-100 text-green-700' : 'bg-primary text-white hover:bg-primary-hover'
             }`}
           >
             {saved ? <><Check size={16} /> 已儲存</> : '儲存設定'}
