@@ -292,6 +292,54 @@ describe('/api/sync is PV-only', () => {
   });
 });
 
+describe('/api/reg-alerts is PV-only', () => {
+  const roleDb = (role: string | null) => ({
+    prepare: () => {
+      const stmt = { bind: () => stmt, first: async () => (role ? { role } : null) };
+      return stmt;
+    },
+  });
+
+  it('reaches the regulatory-alerts handler (not /api/sync) for PV', async () => {
+    const log: string[] = [];
+    const res = await call('/api/reg-alerts', baseEnv({ DB: fakeDb('db', log), AE_DB: roleDb(null), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Jwt-Assertion': await token() });
+    expect(res.status).toBe(200);
+    // The alerts listing, not the sync handler's snapshot lookup.
+    expect(log[0]).toBe('db: SELECT id, source, title,');
+    expect(log.some(l => l.includes('updated_at, device'))).toBe(false);
+  });
+
+  it.each([
+    ['GET', '/api/reg-alerts'],
+    ['POST', '/api/reg-alerts/review'],
+    ['PUT', '/api/reg-alerts/watchlist'],
+    ['POST', '/api/reg-alerts/refresh'],
+  ])('refuses %s %s to a rep without touching DB', async (method, path) => {
+    const log: string[] = [];
+    const env = baseEnv({ DB: fakeDb('db', log), AE_DB: roleDb('rep'), AE_PV_EMAILS: 'someone-else@example.test' });
+    const res = await call(path, env, { 'Cf-Access-Jwt-Assertion': await token({ email: 'rep@example.test' }) }, { method, body: method === 'GET' ? undefined : '{}' });
+    expect(res.status).toBe(403);
+    expect(log).toEqual([]);
+  });
+
+  it('needs a verified Access token', async () => {
+    const log: string[] = [];
+    const res = await call('/api/reg-alerts', baseEnv({ DB: fakeDb('db', log), AE_PV_EMAILS: 'pv@example.test' }), { 'Cf-Access-Authenticated-User-Email': 'pv@example.test' });
+    expect(res.status).toBe(401);
+    expect(log).toEqual([]);
+  });
+
+  it('polls on the cron tick without any caller identity', async () => {
+    const log: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    const pending: Promise<unknown>[] = [];
+    await worker.scheduled({ scheduledTime: Date.UTC(2026, 9, 1) }, baseEnv({ DB: fakeDb('db', log) }), { waitUntil: (p: Promise<unknown>) => { pending.push(p); } });
+    await Promise.all(pending);
+    // The fetch failed, so the poller only recorded the failure against the source.
+    expect(log).toEqual(['db: INSERT INTO reg_sources (source,']);
+  });
+});
+
 describe('Future AGI tracing of the LLM proxies (metadata only)', () => {
   const FI_TRACES = 'https://api.futureagi.com/tracer/v1/traces';
   const tracingEnv = (over: Record<string, unknown> = {}) => baseEnv({

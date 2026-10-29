@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, Product, MonitorBatch, SystemLog } from './services/db';
 import { PENDING_KEY, loadRecordsSync } from './services/literature/storage';
 import { AppMode, ExtractedMaster } from './types';
-import { FileText, Activity, Database, ShieldCheck, Settings, LayoutDashboard, Search, ClipboardCheck, BookOpen, Inbox } from 'lucide-react';
+import { FileText, Activity, Database, ShieldCheck, Settings, LayoutDashboard, Search, ClipboardCheck, BookOpen, Inbox, Landmark } from 'lucide-react';
 import { DashboardMode } from './components/DashboardMode';
 import { GeneratorMode } from './components/GeneratorMode';
 import { MonitorMode } from './components/MonitorMode';
@@ -14,6 +14,7 @@ import { LiteratureSearchMode } from './components/literature/LiteratureSearchMo
 import { LiteratureReviewMode } from './components/literature/LiteratureReviewMode';
 import { LiteratureLibraryMode } from './components/literature/LiteratureLibraryMode';
 import AEIntakePage from './components/ae/AEIntakePage';
+import { RegulatoryAlertsMode } from './components/RegulatoryAlertsMode';
 
 export default function App() {
   // Navigation State
@@ -125,6 +126,16 @@ export default function App() {
             >
               <BookOpen size={16}/>
               文獻庫
+            </button>
+            <button
+              onClick={() => setActiveMode('regAlerts')}
+              title="主管機關安全性公告"
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${
+                activeMode === 'regAlerts' ? 'bg-primary text-white shadow-lg shadow-brand-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <Landmark size={16}/>
+              安全公告
             </button>
             <button
               onClick={() => setActiveMode('aeIntake')}
@@ -243,6 +254,8 @@ export default function App() {
 
         {/* 不良反應個案收案（AE 畫面，包在 .ae-theme 範圍內；角色守門在 Worker） */}
         {activeMode === 'aeIntake' && <AEIntakePage />}
+
+        {activeMode === 'regAlerts' && <RegulatoryAlertsMode />}
       </div>
 
       <footer className="max-w-6xl mx-auto px-4 pb-6 text-center text-[11px] text-slate-600">
