@@ -21,20 +21,27 @@
 //
 // With FI_API_KEY/FI_SECRET_KEY set, the LLM proxies also report one
 // metadata-only span per call to Future AGI (see worker/tracing.ts).
+//
+// The hourly cron (wrangler.jsonc triggers) polls one regulator's public
+// safety publications per tick into DB, and /api/reg-alerts* serves them to
+// PV staff (see worker/regfeeds/).
 
 import { verifyAccessJwt, AccessPayload } from './accessJwt';
 // Ported verbatim from PV-Link (plain JS, already covered by its own tests).
 import { handleAeRequest, resolveRole } from './ae/ae.js';
 import { exportLlmSpan, readModel, traceResponse, tracingEnabled, TracingEnv } from './tracing';
+import { handleRegAlerts, isRegPath, RegDb, scheduledRefresh } from './regfeeds/handler';
 
 // Minimal D1 typings so the project needs no @cloudflare/workers-types dep.
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = Record<string, unknown>>(): Promise<T | null>;
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
   run(): Promise<unknown>;
 }
 interface D1Database {
   prepare(query: string): D1PreparedStatement;
+  batch(statements: D1PreparedStatement[]): Promise<unknown[]>;
 }
 
 // Minimal KV typing, same rationale as the D1 typings above.
@@ -167,6 +174,12 @@ async function pvGate(request: Request, env: Env): Promise<string | Response> {
   if (!identity.email) return forbidden;
   const role = await resolveRole({ DB: env.AE_DB, AE_PV_EMAILS: env.AE_PV_EMAILS }, identity.email);
   return role === 'pv' ? identity.email : forbidden;
+}
+
+async function handleReg(request: Request, env: Env, url: URL): Promise<Response> {
+  const email = await pvGate(request, env);
+  if (email instanceof Response) return email;
+  return handleRegAlerts(request, env.DB as RegDb | undefined, url, email);
 }
 
 async function handleSync(request: Request, env: Env, url: URL): Promise<Response> {
@@ -340,6 +353,10 @@ export default {
       return handleAe(request, env, url);
     }
 
+    if (isRegPath(url.pathname)) {
+      return handleReg(request, env, url);
+    }
+
     if (url.pathname.startsWith('/api/')) {
       return handleSync(request, env, url);
     }
@@ -364,5 +381,10 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+
+  // Hourly cron (wrangler.jsonc): one regulator per tick, round-robin.
+  async scheduled(event: { scheduledTime: number }, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(scheduledRefresh(env.DB as RegDb | undefined, event.scheduledTime));
   },
 };

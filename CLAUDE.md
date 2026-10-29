@@ -52,6 +52,15 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   verifies identity and hands it the AE bindings (`AE_DB`, `AE_FILES`) — never `DB`, so AE code can't
   touch the sync snapshots and vice versa. `services/ae/aeReport.ts` is the frontend domain model whose
   seriousness/due-date rules `worker/ae/ae.js` mirrors; `worker/ae/ae.test.ts` cross-checks the two.
+- **worker/regfeeds/** polls regulators' public drug-safety publications (MHRA, FDA DSC, EMA DHPC, PMDA,
+  BfArM, ANSM, TFDA) on the hourly cron (`scheduled` in `worker/index.ts`, one source per tick) into
+  `DB` (`reg_alerts`, `reg_sources`, append-only `reg_audit`), and serves them PV-only at
+  `/api/reg-alerts*`. It only ever fetches the fixed URLs in `sources.ts` — never add a route that lets
+  request content choose a URL (that is an SSRF/open proxy). Ingredient matching is frontend-only
+  (`services/regulatory/match.ts`); the Worker stores raw notices. Feed text and links are third-party
+  input: keep them plain text, and only http(s) links (checked in `parsers.ts` and again in the UI).
+  `components/RegulatoryAlertsMode.tsx` reaches it through `services/regulatory/api.ts`. See
+  `docs/regulatory-alerts.md`.
 
 ## Invariants that will silently break things if violated
 
@@ -88,7 +97,10 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
   see other cases, which is how every rep case became `PV-<year>-0001`. Legacy duplicates are left for PV
   to resolve by hand — they may already be cited in regulatory reports.
 - AE schema changes (`worker/ae/schema.sql`, `worker/ae/migrations/`) are applied to D1 by hand after a
-  backup; CI never runs migrations.
+  backup; CI never runs migrations. Same for `worker/regfeeds/schema.sql` on `DB`.
+- `reg_audit` reviewer/editor comes only from the verified JWT (same rule as `ae_audit`), and the table is
+  append-only (DB triggers). The page's coverage list (`UNCOVERED` in `worker/regfeeds/sources.ts`) must
+  stay honest: a regulator not polled is shown as not polled, never silently dropped.
 - MedDRA seed dictionary (`services/literature/meddra.ts`) is a small hand-picked list, not a
   licensed MedDRA distribution — don't treat an unmatched PT as an error; `matched: false` is an
   expected, common outcome that the UI must keep surfacing to the user for manual SOC assignment.
@@ -97,7 +109,7 @@ Worker deployment (static assets + `/llm` proxy + `/api/sync`), no separate back
 
 ```bash
 npx tsc --noEmit   # must be 0 errors
-npm test           # currently 37 test files / 488 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
+npm test           # currently 41 test files / 570 tests passing (worker/ae tests need Node ≥ 22.5 for node:sqlite)
 npm run build      # vite build must succeed (pdf.js/lucide chunk-size warning is expected, not an error)
 ```
 
@@ -118,3 +130,7 @@ bucket `pv-link-ae-attachments` (`AE_FILES`), verifies Access JWTs against `ACCE
 secret before anyone is treated as PV staff — and since the LLM proxies and sync are PV-only, before
 deploying, or every user's AI features and cloud sync return 403. For `wrangler dev`, put
 `AE_PV_EMAILS=dev@local` in `.dev.vars`.
+
+The regulatory-alerts poller needs `worker/regfeeds/schema.sql` applied to `DB` (by hand, after a
+backup) before the deploy that ships it: `npx wrangler d1 execute pv-signal-monitor --remote
+--file=worker/regfeeds/schema.sql`. Without the tables the page says so (503) and the cron only logs.

@@ -73,6 +73,12 @@
     // Worker).
     "run_worker_first": ["/llm/*", "/ollama-cloud/*", "/api/*"]
   },
+  // Regulators' safety publications (worker/regfeeds/): each hourly tick
+  // polls one source, so every source is refreshed several times a day.
+  // Needs worker/regfeeds/schema.sql applied to DB first (by hand).
+  "triggers": {
+    "crons": ["23 * * * *"]
+  },
   "observability": {
     "enabled": true
   }
